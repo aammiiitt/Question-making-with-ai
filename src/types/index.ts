@@ -68,7 +68,7 @@ export interface DocumentItem {
   file_url?: string;
   file_size: number;
   page_count: number;
-  language: 'English' | 'Bengali' | 'Bilingual';
+  language: 'English' | 'Bengali' | 'Hindi' | 'Bilingual' | 'Other' | 'Not yet verified';
   status: DocumentStatus;
   processing_step?: number; // 1 to 7 in pipeline
   detected_chapters_count: number;
@@ -245,6 +245,8 @@ export interface ChapterWeightage {
   locked: boolean;
   assigned_questions_count: number;
   ai_analysis?: ChapterAIAnalysis;
+  page_start?: number;
+  page_end?: number;
 }
 
 export interface SectionBlueprint {

@@ -52,15 +52,16 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
   onOpenUpload,
   onNavigateToLibrary,
 }) => {
-  // Requirement 9: Real exam builder must require a real textbook
+  // Requirement 8: Real exam builder must require a real textbook, never silently fallback to unrelated doc
   const realDocuments = documents.filter((d) => !d.is_demo);
   const realMathBook = realDocuments.find(
     (d) =>
       d.title.toLowerCase().includes('class vi') ||
       d.title.toLowerCase().includes('class 6') ||
-      d.title.toLowerCase().includes('math')
+      d.title.toLowerCase().includes('math') ||
+      d.title.includes('গণিত')
   );
-  const defaultRealBook = realMathBook || realDocuments[0];
+  const defaultRealBook = realMathBook;
 
   const [useDemoBook, setUseDemoBook] = useState(false);
   const sampleBook =
@@ -194,15 +195,52 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
     );
   }
 
-  // Requirement 3: Handler for confirming physical chapter mapping
+  // Requirement 3 & 5: Handler for confirming physical chapter mapping
   const handleConfirmChapterMapping = async (verifiedChapters: Chapter[]) => {
-    // 1. Save all updated chapters to storage
-    verifiedChapters.forEach((vc) => storageService.saveChapter(vc));
-    setChapters(verifiedChapters);
-
-    // 2. Call server /api/rebuild-chapter-chunks with physical pages
+    // 1. Rebuild chunks and strictly validate for real books
     const docPages = storageService.getDocumentPages(currentBook.id);
-    if (docPages.length > 0) {
+    if (!currentBook.is_demo) {
+      if (!docPages || docPages.length === 0) {
+        throw new Error(
+          'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+        );
+      }
+
+      const res = await fetch('/api/rebuild-chapter-chunks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: currentBook.id,
+          chapters: verifiedChapters,
+          allPages: docPages,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+        );
+      }
+
+      const data = await res.json();
+      if (!data.chunks || !Array.isArray(data.chunks) || data.chunks.length === 0) {
+        throw new Error(
+          'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+        );
+      }
+
+      // Check that every verified chapter received at least one chunk
+      for (const vc of verifiedChapters) {
+        const chapterChunks = data.chunks.filter((chk: any) => chk.chapter_id === vc.id);
+        if (!chapterChunks || chapterChunks.length === 0) {
+          throw new Error(
+            'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+          );
+        }
+      }
+
+      storageService.replaceChunksForDocument(currentBook.id, data.chunks);
+    } else if (docPages.length > 0) {
       try {
         const res = await fetch('/api/rebuild-chapter-chunks', {
           method: 'POST',
@@ -224,7 +262,11 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
       }
     }
 
-    // 3. Mark document verified and confirmed by teacher
+    // 2. Save all updated chapters to storage
+    verifiedChapters.forEach((vc) => storageService.saveChapter(vc));
+    setChapters(verifiedChapters);
+
+    // 3. Mark document verified and confirmed by teacher ONLY after successful rebuild
     const updatedDoc: DocumentItem = {
       ...currentBook,
       status: 'ready',

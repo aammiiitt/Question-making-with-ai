@@ -1,6 +1,7 @@
 import { DocumentItem, PipelineStep } from '../types';
 import { chapterDetectionService } from './chapterDetectionService';
 import { storageService } from './storageService';
+import { classifyPageCoverage } from '../utils/pageClassification';
 
 export const PIPELINE_STEPS: { step: number; name: string; description: string }[] = [
   { step: 1, name: 'File uploaded', description: 'Verifying PDF structure and integrity' },
@@ -98,46 +99,33 @@ export class DocumentProcessingService {
     // Save physical pages to storage for subsequent verification and re-indexing
     storageService.saveDocumentPages(docId, extractedPages);
 
-    // Compute deterministic page-level coverage check
-    let usablePagesCount = 0;
-    let attentionPagesCount = 0;
+    // Compute deterministic page-level coverage check using canonical classification
     let totalExtractedWords = 0;
 
     const pageCoverageRecords = extractedPages.map((p) => {
-      const text = p.text ? p.text.trim() : '';
-      const charCount = text.length;
-      const words = text ? text.split(/\s+/).filter(Boolean) : [];
-      const wordCount = words.length;
-      totalExtractedWords += wordCount;
-
-      const hasUsableText = charCount >= 100 && wordCount >= 15;
-      let extractionStatus: 'read' | 'low_text' | 'empty' | 'failed' = 'read';
-      let flagReason: string | undefined = undefined;
-
-      if (charCount < 20) {
-        extractionStatus = 'empty';
-        flagReason = 'No extractable text — page may contain scanned text, illustrations, blank page, or full-page geometry diagram.';
-        attentionPagesCount++;
-      } else if (charCount < 150 || wordCount < 20) {
-        extractionStatus = 'low_text';
-        flagReason = 'Low text detected — page may contain mathematical diagrams, formulas, tables, or section headers only.';
-        attentionPagesCount++;
-      } else {
-        usablePagesCount++;
-      }
-
-      return {
-        pageNumber: p.pageNumber,
-        characterCount: charCount,
-        wordCount,
-        hasUsableText,
-        extractionStatus,
-        flagReason,
-      };
+      const record = classifyPageCoverage(p.pageNumber, p.text);
+      totalExtractedWords += record.wordCount;
+      return record;
     });
+
+    const usablePagesCount = pageCoverageRecords.filter((r) => r.extractionStatus === 'read').length;
+    const attentionPagesCount = pageCoverageRecords.filter((r) => r.extractionStatus !== 'read').length;
 
     storageService.savePageCoverage(docId, pageCoverageRecords);
     const coveragePercentage = Number(((usablePagesCount / Math.max(1, pageCount)) * 100).toFixed(1));
+
+    // Basic script / language identification
+    const allSampleText = extractedPages.slice(0, 10).map((p) => p.text).join(' ');
+    const bengaliMatches = allSampleText.match(/[\u0980-\u09FF]/g);
+    const hindiMatches = allSampleText.match(/[\u0900-\u097F]/g);
+    let detectedLanguage: DocumentItem['language'] = 'Not yet verified';
+    if (bengaliMatches && bengaliMatches.length > 50) {
+      detectedLanguage = 'Bengali';
+    } else if (hindiMatches && hindiMatches.length > 50) {
+      detectedLanguage = 'Hindi';
+    } else if (/[a-zA-Z]{50,}/.test(allSampleText)) {
+      detectedLanguage = 'English';
+    }
 
     await new Promise((r) => setTimeout(r, 500));
     updateStep(2, 'completed');
@@ -183,7 +171,7 @@ export class DocumentProcessingService {
       file_name: file.name,
       file_size: file.size,
       page_count: pageCount,
-      language: 'English',
+      language: detectedLanguage,
       status: needsReview ? 'needs_review' : 'needs_review', // All real books require teacher verification and confirmation
       processing_step: 7,
       detected_chapters_count: detectionResult.chapters.length,

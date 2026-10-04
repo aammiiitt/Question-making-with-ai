@@ -21,6 +21,21 @@ export class AIWeightageService {
       return [];
     }
 
+    // Requirement 4: Require real source chunks with non-empty text before calling API for real textbooks
+    if (!document.is_demo) {
+      for (const chap of selectedChapters) {
+        const realChunks = storageService.getChunks(document.id, chap.id);
+        const hasMeaningfulText = realChunks.some(
+          (c) => c.text && c.text.trim().length >= 30
+        );
+        if (!realChunks || realChunks.length === 0 || !hasMeaningfulText) {
+          throw new Error(
+            `No verified textbook content is available for ${chap.title}. Please review its physical PDF page range.`
+          );
+        }
+      }
+    }
+
     // 1. Gather representative multi-sample text and deterministic statistics for each selected chapter
     const chaptersPayload = selectedChapters.map((chap) => {
       const realChunks = storageService.getChunks(document.id, chap.id);
@@ -43,7 +58,7 @@ export class AIWeightageService {
         middleSample = realChunks[midIdx] ? realChunks[midIdx].text.slice(0, 1600) : '';
         const lastIdx = realChunks.length - 1;
         endingSample = realChunks[lastIdx] ? realChunks[lastIdx].text.slice(0, 1600) : '';
-      } else {
+      } else if (document.is_demo) {
         beginningSample = `Chapter ${chap.chapter_number}: ${chap.title} covering physical PDF pages ${chap.page_start} to ${chap.page_end}.`;
       }
 
@@ -106,10 +121,34 @@ export class AIWeightageService {
       fetchError = err.message || 'Network error communicating with analysis endpoint.';
     }
 
-    // Requirement 4: Strictly fail on error for real uploaded textbooks.
-    // Do NOT silently substitute generic scores.
-    if ((!aiResults || aiResults.length === 0) && !document.is_demo) {
-      throw new Error(`AI chapter analysis failed. Please retry.`);
+    // Requirement 3: Complete AI analysis validation for real books
+    if (!document.is_demo) {
+      if (fetchError || !aiResults || aiResults.length === 0) {
+        throw new Error('AI chapter analysis failed. Please retry.');
+      }
+
+      const selectedIds = selectedChapters.map((c) => c.id);
+      const resultIds = aiResults.map((r: any) => r.chapter_id);
+
+      // AI result count === selected chapter count
+      if (resultIds.length !== selectedIds.length) {
+        throw new Error('AI chapter analysis was incomplete. Please retry.');
+      }
+
+      // Every selected ID appears EXACTLY ONCE, no unexpected ID, no duplicates
+      const resultIdSet = new Set<string>();
+      for (const rId of resultIds) {
+        if (resultIdSet.has(rId)) {
+          throw new Error('AI chapter analysis was incomplete. Please retry.');
+        }
+        resultIdSet.add(rId);
+      }
+
+      for (const sId of selectedIds) {
+        if (!resultIdSet.has(sId)) {
+          throw new Error('AI chapter analysis was incomplete. Please retry.');
+        }
+      }
     }
 
     // 2. Map AI results or clearly labelled sample heuristic for demo books
@@ -146,6 +185,11 @@ export class AIWeightageService {
             assessment_richness: `Provides rich variety of 1M, 2M, 3M and 4M questions.`,
           },
         };
+      }
+
+      // If no matching AI result AND document.is_demo !== true: THROW ERROR!
+      if (!document.is_demo) {
+        throw new Error('AI chapter analysis was incomplete. Please retry.');
       }
 
       // ONLY for demo sample book: Clearly labelled demo heuristic

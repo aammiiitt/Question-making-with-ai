@@ -27,6 +27,7 @@ import {
   PageCoverageRecord,
 } from '../../types';
 import { storageService } from '../../services/storageService';
+import { examPaperService } from '../../services/examPaperService';
 
 interface TextbookProcessingReportProps {
   document: DocumentItem;
@@ -85,11 +86,36 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
   const [confirmationError, setConfirmationError] = useState<string | null>(null);
   const [confirmationSuccess, setConfirmationSuccess] = useState(false);
 
+  // Language state (Requirement 7: allow teacher to select/confirm)
+  const [documentLanguage, setDocumentLanguage] = useState<DocumentItem['language']>(
+    document.language || 'Not yet verified'
+  );
+
+  const handleLanguageChange = (newLang: DocumentItem['language']) => {
+    setDocumentLanguage(newLang);
+    const updated: DocumentItem = { ...document, language: newLang };
+    storageService.saveDocument(updated);
+  };
+
   // Document-level calculated numbers (never fabricated!)
-  const totalPhysicalPages = document.page_count || pageRecords.length || rawPages.length || 1;
-  const usablePagesCount = pageRecords.filter((p) => p.hasUsableText || p.extractionStatus === 'read').length;
+  // Canonical Classification:
+  // READ: characterCount >= 150 AND wordCount >= 20
+  // LOW_TEXT: characterCount >= 20 but does not satisfy READ
+  // EMPTY: characterCount < 20
+  // FAILED: only when actual extraction failure is known
+  // hasUsableText = extractionStatus === "read"
+  // Mutually exclusive: Successfully Read (read) + Needing Attention (low_text + empty + failed) = Total Physical Pages
+  const totalPhysicalPages =
+    pageRecords.length > 0 ? pageRecords.length : (document.page_count || rawPages.length || 1);
+  const usablePagesCount =
+    pageRecords.length > 0
+      ? pageRecords.filter((p) => p.extractionStatus === 'read').length
+      : (document.usable_pages_count ?? 0);
   const attentionPages = pageRecords.filter((p) => p.extractionStatus !== 'read');
-  const attentionPagesCount = attentionPages.length;
+  const attentionPagesCount =
+    pageRecords.length > 0
+      ? attentionPages.length
+      : (document.attention_pages_count ?? Math.max(0, totalPhysicalPages - usablePagesCount));
 
   const totalExtractedChars =
     document.total_extracted_chars ||
@@ -212,43 +238,77 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
       }
     }
 
+    // Requirement 2: Sort edited chapters by physical PDF page_start and validate overlapping ranges
+    const sorted = [...editedChapters].sort((a, b) => a.page_start - b.page_start);
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const curr = sorted[i];
+      const next = sorted[i + 1];
+      if (curr.page_end >= next.page_start) {
+        setConfirmationError(
+          `Chapter page ranges overlap:\n${curr.title} (${curr.page_start}–${curr.page_end})\n${next.title} (${next.page_start}–${next.page_end}).\nPlease correct the physical PDF ranges.`
+        );
+        return;
+      }
+    }
+
     setIsConfirming(true);
     try {
-      const verifiedChapters: Chapter[] = editedChapters.map((c, idx) => ({
+      const verifiedChapters: Chapter[] = sorted.map((c, idx) => ({
         ...c,
         chapter_number: idx + 1,
         status: 'verified' as const,
       }));
 
-      // 1. Save chapters
-      verifiedChapters.forEach((vc) => storageService.saveChapter(vc));
+      // Requirement 5: Do NOT set teacher_confirmed = true if chunks rebuild fails
+      if (!rawPages || rawPages.length === 0) {
+        throw new Error(
+          'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+        );
+      }
 
-      // 2. Call server to rebuild real knowledge chunks from physical pages
-      if (rawPages.length > 0) {
-        try {
-          const res = await fetch('/api/rebuild-chapter-chunks', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              documentId: document.id,
-              chapters: verifiedChapters,
-              allPages: rawPages,
-            }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.chunks && Array.isArray(data.chunks)) {
-              storageService.replaceChunksForDocument(document.id, data.chunks);
-            }
-          }
-        } catch (e) {
-          console.warn('Backend chunk rebuild fallback:', e);
+      const res = await fetch('/api/rebuild-chapter-chunks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: document.id,
+          chapters: verifiedChapters,
+          allPages: rawPages,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+        );
+      }
+
+      const data = await res.json();
+      if (!data.chunks || !Array.isArray(data.chunks) || data.chunks.length === 0) {
+        throw new Error(
+          'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+        );
+      }
+
+      // Check that every verified chapter received at least one chunk
+      for (const vc of verifiedChapters) {
+        const chapterChunks = data.chunks.filter((chk: any) => chk.chapter_id === vc.id);
+        if (!chapterChunks || chapterChunks.length === 0) {
+          throw new Error(
+            'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+          );
         }
       }
 
-      // 3. Mark document as confirmed by teacher!
+      // Save rebuilt chunks and verified chapters
+      storageService.replaceChunksForDocument(document.id, data.chunks);
+      verifiedChapters.forEach((vc) => storageService.saveChapter(vc));
+      setEditedChapters(verifiedChapters);
+
+      // Only set teacher_confirmed after successful rebuild and validation!
       const updatedDoc: DocumentItem = {
         ...document,
+        language: documentLanguage,
         status: 'ready',
         teacher_confirmed: true,
         teacher_confirmed_at: new Date().toISOString(),
@@ -256,6 +316,8 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
       };
 
       storageService.saveDocument(updatedDoc);
+      // Requirement 6: Synchronize saved exam paper after chapter mapping change
+      examPaperService.synchronizeSavedPaper(updatedDoc, verifiedChapters);
       setConfirmationSuccess(true);
 
       if (onConfirmSuccess) {
@@ -263,7 +325,10 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
       }
     } catch (err: any) {
       console.error(err);
-      setConfirmationError(err.message || 'Failed to confirm chapter mappings.');
+      setConfirmationError(
+        err.message ||
+          'Textbook verification could not be completed because chapter source content could not be rebuilt. Please retry.'
+      );
     } finally {
       setIsConfirming(false);
     }
@@ -275,7 +340,7 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
       (p) => p.pageNumber >= chap.page_start && p.pageNumber <= chap.page_end
     );
     const totalRange = Math.max(1, chap.page_end - chap.page_start + 1);
-    const usableInRange = rangePages.filter((p) => p.hasUsableText || p.extractionStatus === 'read').length;
+    const usableInRange = rangePages.filter((p) => p.extractionStatus === 'read').length;
     const attentionInRange = rangePages.filter((p) => p.extractionStatus !== 'read');
     const chapChunks = chunks.filter((c) => c.chapter_id === chap.id);
     const chapTopics = topics.filter((t) => t.chapter_id === chap.id);
@@ -387,8 +452,26 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
             </div>
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-              <span className="text-slate-400 block text-[11px]">Detected Language</span>
-              <span className="font-semibold text-slate-800 text-sm">{document.language || 'English'}</span>
+              <span className="text-slate-400 block text-[11px]">Language Specification</span>
+              <div className="mt-1 flex items-center gap-1.5">
+                <select
+                  value={documentLanguage}
+                  onChange={(e) => handleLanguageChange(e.target.value as any)}
+                  className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer"
+                >
+                  <option value="Not yet verified">Not yet verified</option>
+                  <option value="English">English</option>
+                  <option value="Bengali">Bengali</option>
+                  <option value="Hindi">Hindi</option>
+                  <option value="Bilingual">Bilingual</option>
+                  <option value="Other">Other</option>
+                </select>
+                {documentLanguage !== 'Not yet verified' && (
+                  <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1 py-0.5 rounded">
+                    Verified ✓
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">

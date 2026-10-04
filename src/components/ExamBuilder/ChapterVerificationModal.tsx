@@ -98,9 +98,24 @@ export const ChapterVerificationModal: React.FC<ChapterVerificationModalProps> =
       }
     }
 
+    // Sort edited chapters by physical PDF page_start
+    const sorted = [...editedChapters].sort((a, b) => a.page_start - b.page_start);
+
+    // Validate each adjacent pair for overlapping page ranges
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const curr = sorted[i];
+      const next = sorted[i + 1];
+      if (curr.page_end >= next.page_start) {
+        setErrorMsg(
+          `Chapter page ranges overlap:\n${curr.title} (${curr.page_start}–${curr.page_end})\n${next.title} (${next.page_start}–${next.page_end}).\nPlease correct the physical PDF ranges.`
+        );
+        return;
+      }
+    }
+
     setIsSaving(true);
     try {
-      const verified = editedChapters.map((c, idx) => ({
+      const verified = sorted.map((c, idx) => ({
         ...c,
         chapter_number: idx + 1,
         status: 'verified' as const,

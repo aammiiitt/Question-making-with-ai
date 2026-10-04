@@ -8,6 +8,7 @@ import {
   User,
   PageCoverageRecord,
 } from '../types';
+import { classifyPageCoverage } from '../utils/pageClassification';
 import {
   DEMO_BOOK,
   DEMO_CHAPTERS,
@@ -167,37 +168,34 @@ class StorageService {
     const rawPages = this.getDocumentPages(docId);
     if (rawPages.length > 0) {
       const computed: PageCoverageRecord[] = rawPages.map((p) => {
-        const text = p.text ? p.text.trim() : '';
-        const characterCount = text.length;
-        const words = text ? text.split(/\s+/).filter(Boolean) : [];
-        const wordCount = words.length;
-        const hasUsableText = characterCount >= 100 && wordCount >= 15;
-
-        let extractionStatus: 'read' | 'low_text' | 'empty' | 'failed' = 'read';
-        let flagReason: string | undefined = undefined;
-
-        if (characterCount < 20) {
-          extractionStatus = 'empty';
-          flagReason =
-            'No extractable text — page may contain scanned text, illustrations, blank page, or full-page geometry diagram.';
-        } else if (characterCount < 150 || wordCount < 20) {
-          extractionStatus = 'low_text';
-          flagReason =
-            'Low text detected — may contain mathematical diagrams, formulas, tables, or section headers only.';
-        }
-
-        return {
-          pageNumber: p.pageNumber,
-          characterCount,
-          wordCount,
-          hasUsableText,
-          extractionStatus,
-          flagReason,
-        };
+        return classifyPageCoverage(p.pageNumber, p.text);
       });
 
       this.savePageCoverage(docId, computed);
       return computed;
+    }
+
+    // For demo books without raw pages, synthesize consistent coverage records
+    const doc = this.getDocuments().find((d) => d.id === docId);
+    if (doc && doc.is_demo && doc.page_count > 0) {
+      const demoRecords: PageCoverageRecord[] = [];
+      const total = doc.page_count;
+      const attentionCount = doc.attention_pages_count || Math.min(4, total);
+      const readCount = Math.max(0, total - attentionCount);
+      for (let i = 1; i <= total; i++) {
+        if (i <= readCount) {
+          demoRecords.push(
+            classifyPageCoverage(
+              i,
+              'Standard textbook instructional page containing definitions, theorems, worked examples, and comprehensive exercise problems for students to practice.'.repeat(3)
+            )
+          );
+        } else {
+          demoRecords.push(classifyPageCoverage(i, 'Diagram'));
+        }
+      }
+      this.savePageCoverage(docId, demoRecords);
+      return demoRecords;
     }
 
     return [];

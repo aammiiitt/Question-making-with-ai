@@ -23,12 +23,97 @@ export type GenerateBlueprintResult =
 
 export class ExamPaperService {
   /**
+   * Synchronizes an existing paper's chaptersWeightage against a verified list of chapters.
+   * Removes deleted chapter entries, adds new chapters, updates titles/numbers/page ranges,
+   * and resets questions/weightages if structure or page ranges changed.
+   */
+  public syncPaperWithChapters(
+    existing: ClassVIExamPaper,
+    document: DocumentItem,
+    chapters: Chapter[]
+  ): ClassVIExamPaper {
+    const existingWeightage = existing.chaptersWeightage || [];
+    const currentChapterIds = new Set(chapters.map((c) => c.id));
+    const existingChapterIds = new Set(existingWeightage.map((w) => w.chapter_id));
+
+    const hasAddedOrRemoved =
+      chapters.some((c) => !existingChapterIds.has(c.id)) ||
+      existingWeightage.some((w) => !currentChapterIds.has(w.chapter_id));
+
+    const hasMetadataChanged = chapters.some((c) => {
+      const found = existingWeightage.find((w) => w.chapter_id === c.id);
+      return (
+        found &&
+        (found.chapter_title !== c.title ||
+          found.chapter_number !== c.chapter_number ||
+          found.page_start !== c.page_start ||
+          found.page_end !== c.page_end)
+      );
+    });
+
+    if (hasAddedOrRemoved || hasMetadataChanged) {
+      // Synchronize chaptersWeightage against verified chapter list:
+      // Remove deleted chapter entries, add newly created chapters, update changed chapter titles/numbers/page ranges
+      const updatedWeights: ChapterWeightage[] = chapters.map((c) => {
+        const prev = existingWeightage.find((w) => w.chapter_id === c.id);
+        if (prev) {
+          const pageRangeChanged = prev.page_start !== c.page_start || prev.page_end !== c.page_end;
+          return {
+            ...prev,
+            chapter_title: c.title,
+            chapter_number: c.chapter_number,
+            page_start: c.page_start,
+            page_end: c.page_end,
+            // If physical page range changed, reset outdated AI analysis
+            ai_analysis: pageRangeChanged ? undefined : prev.ai_analysis,
+          };
+        }
+        return {
+          chapter_id: c.id,
+          chapter_title: c.title,
+          chapter_number: c.chapter_number,
+          page_start: c.page_start,
+          page_end: c.page_end,
+          included: false,
+          marks: 0,
+          percentage: 0,
+          locked: false,
+          assigned_questions_count: 0,
+        };
+      });
+
+      // Clear existing slots & reset status to configuring because sources/structure/ranges changed
+      const synchronizedPaper: ClassVIExamPaper = {
+        ...existing,
+        bookTitle: document.title,
+        chaptersWeightage: updatedWeights,
+        slots: [], // reset affected questions/slots
+        aiAnalyses: undefined, // reset analyses to require recalculation
+        status: 'configuring', // mark paper as needing recalculation
+        paperHealth: this.computePaperHealth([], updatedWeights, 70),
+        updated_at: new Date().toISOString(),
+      };
+
+      this.savePaper(synchronizedPaper);
+      return synchronizedPaper;
+    }
+
+    return existing;
+  }
+
+  public synchronizeSavedPaper(document: DocumentItem, chapters: Chapter[]): ClassVIExamPaper | null {
+    const existing = this.loadSavedPaper();
+    if (!existing || existing.documentId !== document.id) return null;
+    return this.syncPaperWithChapters(existing, document, chapters);
+  }
+
+  /**
    * Initializes or loads the Class VI Mathematics 70-mark paper
    */
   public getOrCreatePaper(document: DocumentItem, chapters: Chapter[]): ClassVIExamPaper {
     const existing = this.loadSavedPaper();
     if (existing && existing.documentId === document.id) {
-      return existing;
+      return this.syncPaperWithChapters(existing, document, chapters);
     }
 
     // Default: select 5 core chapters with standard 70-mark weightage
@@ -58,6 +143,8 @@ export class ExamPaperService {
         chapter_id: chap.id,
         chapter_title: chap.title,
         chapter_number: chap.chapter_number,
+        page_start: chap.page_start,
+        page_end: chap.page_end,
         included: isIncluded,
         marks: targetM,
         percentage: Number(((targetM / 70) * 100).toFixed(1)),
