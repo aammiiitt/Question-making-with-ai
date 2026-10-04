@@ -33,7 +33,7 @@ export class QuestionGenerationService {
 
     // 1. RAG Passage Retrieval
     onProgress?.('Finding relevant textbook content...', 1);
-    await new Promise((r) => setTimeout(r, 450));
+    await new Promise((r) => setTimeout(r, 350));
 
     const retrievedPassages = await knowledgeRetrievalService.retrieveRelevantPassages(
       req.documentId,
@@ -44,20 +44,13 @@ export class QuestionGenerationService {
       req.additionalInstructions
     );
 
-    let passages = retrievedPassages;
-    if (passages.length === 0) {
-      const minP = chapter.page_start || 1;
-      const maxP = chapter.page_end || minP + 10;
-      passages = [
-        {
-          chunkId: `chunk-${chapter.id}-dynamic`,
-          pageStart: minP,
-          pageEnd: maxP,
-          text: `Textbook Material: Chapter ${chapter.title} (Pages ${minP}–${maxP}). Core principles, definitions, laws, and problem-solving content for ${chapter.title}.`,
-          relevanceScore: 0.95,
-        },
-      ];
+    if (retrievedPassages.length === 0) {
+      throw new Error(
+        `Not enough source information: No verified textbook passages found for "${chapter.title}". Please upload or index the textbook pages.`
+      );
     }
+
+    const passages = retrievedPassages;
 
     // Determine allowed page range from retrieved chunks
     const minPage = Math.min(...passages.map((p) => p.pageStart));
@@ -98,30 +91,36 @@ export class QuestionGenerationService {
         console.warn('Backend question generator returned error:', errorData);
       }
     } catch (err) {
-      console.warn('Direct fetch to /api/generate-question failed or offline:', err);
+      console.warn('Direct fetch to /api/generate-question failed:', err);
     }
 
-    // If server generation didn't succeed, synthesize high-fidelity grounded question from the actual retrieved passages
+    // Phase 4: Strictly NO synthetic question fallback for real exam mode
     if (!rawAiResult) {
-      rawAiResult = this.synthesizeFromPassages(
-        retrievedPassages[0],
-        chapter.title,
-        topic?.title || 'Core Principles',
-        req
-      );
+      // If book is purely sample demo, allow fallback; otherwise reject
+      if (document.is_demo) {
+        rawAiResult = this.synthesizeFromPassages(
+          retrievedPassages[0],
+          chapter.title,
+          topic?.title || 'Core Principles',
+          req
+        );
+      } else {
+        throw new Error('AI generation failed. Please retry this question.');
+      }
     }
 
     onProgress?.('Checking model answer and marking scheme...', 3);
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 300));
 
     onProgress?.('Checking source page citations...', 4);
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 300));
 
-    // Validate structured output
-    const validation = questionValidationService.validate(rawAiResult, {
-      min: minPage,
-      max: maxPage,
-    });
+    // Validate structured output against schema, marking scheme sum, and source pages
+    const validation = questionValidationService.validate(
+      rawAiResult,
+      { min: minPage, max: maxPage },
+      retrievedPassages
+    );
 
     if (!validation.isValid || !validation.sanitized) {
       throw new Error(`AI generation validation failed: ${validation.errors.join(', ')}`);
@@ -129,7 +128,7 @@ export class QuestionGenerationService {
 
     const sanitized = validation.sanitized;
     onProgress?.('Finalizing question card...', 5);
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 200));
 
     const questionId = 'q-' + Date.now();
     const answerId = 'ans-' + Date.now();
@@ -152,6 +151,8 @@ export class QuestionGenerationService {
       page_end: sanitized.source_pages[sanitized.source_pages.length - 1] || maxPage,
       source_text: sanitized.source_excerpt || retrievedPassages[0].text,
       source_confidence: validation.isSourceVerified ? sanitized.source_confidence : 0.65,
+      retrieved_chunk_ids: retrievedPassages.map((p) => p.chunkId),
+      is_real_pdf_grounded: !document.is_demo,
     };
 
     const fullQuestion: QuestionItem = {
@@ -172,6 +173,7 @@ export class QuestionGenerationService {
       bloom_level: sanitized.bloom_level,
       language: req.language,
       status: 'ai_generated',
+      source_grounding_status: validation.sourceGroundingStatus,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       answer: answerObj,

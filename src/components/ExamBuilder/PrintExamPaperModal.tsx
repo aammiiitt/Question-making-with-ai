@@ -33,10 +33,10 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
             <FileText className="w-5 h-5 text-slate-800" />
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Official Examination Paper Preview (Class VI · 70 Marks)
+                CLASS VI MATHEMATICS · CUSTOM 70-MARK SCHOOL EXAMINATION
               </h2>
               <p className="text-xs text-slate-500">
-                Formatted for CBSE / WBBSE school examination standards
+                Print & Export Preview · 32 Questions · Strict Chapter Weightage
               </p>
             </div>
           </div>

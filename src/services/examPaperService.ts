@@ -7,6 +7,7 @@ import {
   QuestionItem,
   Chapter,
   DocumentItem,
+  WeightageMode,
 } from '../types';
 import { DEFAULT_SECTION_BLUEPRINTS, CLASS_VI_MATH_BOOK, CLASS_VI_MATH_CHAPTERS } from '../data/demoData';
 import { constraintSolver, SolverResult } from './constraintSolver';
@@ -75,7 +76,7 @@ export class ExamPaperService {
 
     const paper: ClassVIExamPaper = {
       id: 'paper-c6-math-' + Date.now(),
-      title: 'ANNUAL / SUMMATIVE EVALUATION (MATHEMATICS)',
+      title: 'CLASS VI MATHEMATICS · CUSTOM 70-MARK SCHOOL EXAMINATION',
       schoolName: 'MODEL HIGH SCHOOL',
       className: 'Class VI',
       subject: 'Mathematics',
@@ -83,7 +84,7 @@ export class ExamPaperService {
       timeAllowed: '2 Hours 30 Minutes',
       documentId: document.id,
       bookTitle: document.title,
-      weightageMode: 'exact_marks',
+      weightageMode: 'ai_recommended',
       chaptersWeightage: initialWeights,
       sections: DEFAULT_SECTION_BLUEPRINTS,
       slots: [],
@@ -120,7 +121,7 @@ export class ExamPaperService {
   public updateWeightage(
     paper: ClassVIExamPaper,
     updatedWeights: ChapterWeightage[],
-    mode: ChapterWeightage['marks'] extends number ? 'exact_marks' | 'percentage' | 'equal' : any
+    mode: WeightageMode
   ): ClassVIExamPaper {
     const included = updatedWeights.filter((c) => c.included);
 
@@ -278,7 +279,11 @@ export class ExamPaperService {
       ...paper,
       slots: updatedSlots,
       paperHealth: health,
-      status: health.isReady ? 'ready' : 'draft',
+      status: health.isReady
+        ? 'ready'
+        : health.totalQuestionsActual === health.totalQuestionsExpected
+        ? 'needs_review'
+        : 'draft',
       updated_at: new Date().toISOString(),
     };
 
@@ -385,11 +390,25 @@ export class ExamPaperService {
     const questionTexts: string[] = [];
     let duplicateCount = 0;
     let sourceGroundingPassed = true;
+    let allSourceGroundingPassed = true;
+    const invalidMarkingSchemeSlotNumbers: number[] = [];
+    const healthIssues: string[] = [];
 
     for (const s of slots) {
       if (s.questionItem) {
         if (s.questionItem.answer?.answer_text?.trim()) answerKeysCount++;
-        if (s.questionItem.answer?.marking_scheme?.length) markingSchemesCount++;
+        
+        // Phase 6: Validate that sum(marking_scheme.marks) === question.marks
+        const ms = s.questionItem.answer?.marking_scheme;
+        if (Array.isArray(ms) && ms.length > 0) {
+          markingSchemesCount++;
+          const schemeSum = ms.reduce((sum, item) => sum + (Number(item.marks) || 0), 0);
+          if (schemeSum !== s.questionItem.marks) {
+            invalidMarkingSchemeSlotNumbers.push(s.slotNumber);
+          }
+        } else {
+          invalidMarkingSchemeSlotNumbers.push(s.slotNumber);
+        }
 
         const normText = s.questionItem.question_text.toLowerCase().trim();
         if (questionTexts.includes(normText)) {
@@ -398,12 +417,46 @@ export class ExamPaperService {
           questionTexts.push(normText);
         }
 
-        if (!s.questionItem.source?.source_text) {
+        // Phase 5 & 7: Check real source passage grounding
+        const hasRealSource = Boolean(
+          s.questionItem.source?.source_text && s.questionItem.source.source_text.trim().length > 20
+        );
+        const isVerified = s.questionItem.source_grounding_status !== 'needs_review';
+
+        if (!hasRealSource || !isVerified) {
           sourceGroundingPassed = false;
+          allSourceGroundingPassed = false;
         }
       }
     }
 
+    const allMarkingSchemesSumValid = invalidMarkingSchemeSlotNumbers.length === 0;
+
+    if (actualTotalMarks !== targetTotalMarks) {
+      healthIssues.push(`Total marks (${actualTotalMarks}) does not match target ${targetTotalMarks} marks.`);
+    }
+    if (expectedQuestions > 0 && actualQuestions < expectedQuestions) {
+      healthIssues.push(`${expectedQuestions - actualQuestions} question slots pending generation.`);
+    }
+    if (!allChaptersPassed) {
+      healthIssues.push('Chapter marks allocation does not match exact teacher targets.');
+    }
+    if (duplicateCount > 0) {
+      healthIssues.push(`${duplicateCount} duplicate question(s) detected.`);
+    }
+    if (expectedQuestions > 0 && answerKeysCount < expectedQuestions) {
+      healthIssues.push(`Missing answer keys (${answerKeysCount}/${expectedQuestions}).`);
+    }
+    if (!allMarkingSchemesSumValid) {
+      healthIssues.push(
+        `Marking scheme sum mismatch in Slot(s): #${invalidMarkingSchemeSlotNumbers.join(', #')}.`
+      );
+    }
+    if (!allSourceGroundingPassed) {
+      healthIssues.push('Some questions have unverified or missing textbook source grounding.');
+    }
+
+    // Phase 7: Strict READY condition
     const isReady =
       actualTotalMarks === targetTotalMarks &&
       expectedQuestions > 0 &&
@@ -411,7 +464,9 @@ export class ExamPaperService {
       allChaptersPassed &&
       duplicateCount === 0 &&
       answerKeysCount === expectedQuestions &&
-      markingSchemesCount === expectedQuestions;
+      markingSchemesCount === expectedQuestions &&
+      allMarkingSchemesSumValid &&
+      allSourceGroundingPassed;
 
     return {
       totalMarksExpected: targetTotalMarks,
@@ -422,9 +477,13 @@ export class ExamPaperService {
       allChaptersPassed,
       answerKeysCount,
       markingSchemesCount,
+      allMarkingSchemesSumValid,
+      invalidMarkingSchemeSlotNumbers,
       duplicateCount,
       sourceGroundingPassed,
+      allSourceGroundingPassed,
       isReady,
+      healthIssues,
     };
   }
 }

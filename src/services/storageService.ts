@@ -12,10 +12,10 @@ import {
   CLASS_VI_MATH_CHUNKS,
 } from '../data/demoData';
 
-const ALL_INITIAL_BOOKS = [CLASS_VI_MATH_BOOK, DEMO_BOOK];
-const ALL_INITIAL_CHAPTERS = [...CLASS_VI_MATH_CHAPTERS, ...DEMO_CHAPTERS];
-const ALL_INITIAL_TOPICS = [...CLASS_VI_MATH_TOPICS, ...DEMO_TOPICS];
-const ALL_INITIAL_CHUNKS = [...CLASS_VI_MATH_CHUNKS, ...DEMO_KNOWLEDGE_CHUNKS];
+const ALL_INITIAL_BOOKS = [DEMO_BOOK];
+const ALL_INITIAL_CHAPTERS = [...DEMO_CHAPTERS];
+const ALL_INITIAL_TOPICS = [...DEMO_TOPICS];
+const ALL_INITIAL_CHUNKS = [...DEMO_KNOWLEDGE_CHUNKS];
 
 const STORAGE_KEYS = {
   USER: 'ai_qpm_user',
@@ -60,15 +60,21 @@ class StorageService {
       localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(docs));
     } else {
       docs = JSON.parse(data);
-      // Auto-migrate: ensure Class VI Math book is present
-      for (const initialBook of ALL_INITIAL_BOOKS) {
-        if (!docs.some((d) => d.id === initialBook.id)) {
-          docs.unshift(initialBook);
-        }
+      // Remove any previously auto-injected hardcoded fake 'doc-class6-math' that is not a real upload
+      const filtered = docs.filter((d) => d.id !== 'doc-class6-math');
+      if (filtered.length !== docs.length) {
+        docs = filtered;
+        localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(docs));
       }
-      localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(docs));
     }
     return docs;
+  }
+
+  /**
+   * Returns real uploaded textbooks (excluding demo/sample material)
+   */
+  public getRealDocuments(): DocumentItem[] {
+    return this.getDocuments().filter((d) => !d.is_demo);
   }
 
   public saveDocument(doc: DocumentItem): void {
@@ -103,13 +109,12 @@ class StorageService {
       localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(chapters));
     } else {
       chapters = JSON.parse(data);
-      // Auto-migrate
-      for (const initChap of ALL_INITIAL_CHAPTERS) {
-        if (!chapters.some((c) => c.id === initChap.id)) {
-          chapters.push(initChap);
-        }
+      // Remove any previously auto-injected hardcoded fake 'doc-class6-math' chapters
+      const filtered = chapters.filter((c) => c.document_id !== 'doc-class6-math');
+      if (filtered.length !== chapters.length) {
+        chapters = filtered;
+        localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(chapters));
       }
-      localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(chapters));
     }
     return documentId ? chapters.filter((c) => c.document_id === documentId) : chapters;
   }
@@ -187,49 +192,6 @@ class StorageService {
       if (chapterId && c.chapter_id !== chapterId) return false;
       return true;
     });
-
-    // If chapterId is specified and no chunks exist, auto-create syllabus chunks for this chapter
-    if (filtered.length === 0 && documentId && chapterId) {
-      const chapters = this.getChapters(documentId);
-      const chapter = chapters.find((c) => c.id === chapterId);
-      if (chapter) {
-        const topics = this.getTopics(chapterId);
-        const startP = chapter.page_start || 1;
-        const endP = chapter.page_end || startP + 12;
-
-        const autoChunk1: KnowledgeChunk = {
-          id: `chunk-${chapterId}-core`,
-          document_id: documentId,
-          chapter_id: chapterId,
-          topic_id: topics[0]?.id,
-          page_start: startP,
-          page_end: Math.min(startP + 3, endP),
-          extraction_confidence: 0.95,
-          text: `Section: ${chapter.title} - Fundamental Principles and Theoretical Framework (Pages ${startP}–${Math.min(startP + 3, endP)}).
-This section introduces the foundational concepts, definitions, and physical laws of ${chapter.title}.
-All experimental observations, definitions, units, and mathematical formulations comply with standard school board syllabus guidelines.
-বাংলা অনুবাদ: ${chapter.title} অধ্যায়ের প্রাথমিক নীতি, সংজ্ঞা ও গাণিতিক সূত্রাবলী।`,
-        };
-
-        const autoChunk2: KnowledgeChunk = {
-          id: `chunk-${chapterId}-app`,
-          document_id: documentId,
-          chapter_id: chapterId,
-          topic_id: topics[1]?.id || topics[0]?.id,
-          page_start: Math.min(startP + 4, endP),
-          page_end: endP,
-          extraction_confidence: 0.94,
-          text: `Section: ${chapter.title} - Applications, Problem Solving & Derivations (Pages ${Math.min(startP + 4, endP)}–${endP}).
-Detailed analysis of laws, numerical problem solving, step-by-step derivations, and practical applications in ${chapter.title}.
-All formulas, units, and boundary conditions are explicitly stated for assessment and evaluation.
-বাংলা অনুবাদ: ${chapter.title}-এর প্রয়োগ, গাণিতিক উদাহরণ ও সমীকরণ প্রতিপাদন।`,
-        };
-
-        this.saveChunk(autoChunk1);
-        this.saveChunk(autoChunk2);
-        filtered = [autoChunk1, autoChunk2];
-      }
-    }
 
     return filtered;
   }

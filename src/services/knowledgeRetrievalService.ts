@@ -23,29 +23,11 @@ export class KnowledgeRetrievalService {
     additionalInstructions?: string
   ): Promise<RetrievedPassage[]> {
     // 1. Filter chunks by document + chapter
-    let chunks = storageService.getChunks(documentId, chapterId);
+    const chunks = storageService.getChunks(documentId, chapterId);
 
-    // If still empty (e.g. for a custom chapter without pre-extracted text), construct grounded passage
+    // Strict Grounding Rule: If no real chunks exist for this chapter, do NOT fabricate text.
     if (chunks.length === 0) {
-      const chapters = storageService.getChapters(documentId);
-      const chapter = chapters.find((c) => c.id === chapterId);
-      const startP = chapter?.page_start || 1;
-      const endP = chapter?.page_end || startP + 10;
-      const title = chapter?.title || 'Selected Chapter';
-
-      const fallbackChunk: KnowledgeChunk = {
-        id: `chunk-${chapterId}-fallback`,
-        document_id: documentId,
-        chapter_id: chapterId,
-        page_start: startP,
-        page_end: endP,
-        extraction_confidence: 0.95,
-        text: `Textbook Material: Chapter ${title} (Pages ${startP}–${endP}).
-Prescribed syllabus coverage of fundamental definitions, scientific laws, principles, units, mathematical formulas, and problem solving for ${title}.
-বাংলা অনুবাদ: ${title} অধ্যায়ের পাঠ্যপুস্তকীয় বিষয়বস্তু, সূত্র, সংজ্ঞা ও গাণিতিক উদাহরণ।`,
-      };
-      storageService.saveChunk(fallbackChunk);
-      chunks = [fallbackChunk];
+      return [];
     }
 
     // 2. Compute relevance scores

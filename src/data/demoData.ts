@@ -12,13 +12,14 @@ export const INITIAL_USER: User = {
 export const DEMO_BOOK: DocumentItem = {
   id: 'doc-demo-class10-physics',
   user_id: 'teacher-101',
-  title: 'Class X Physical Science',
-  file_name: 'Class_X_Physical_Science_NCERT_WBBSE.pdf',
+  title: 'DEMO / SAMPLE — Class X Physical Science',
+  file_name: 'Class_X_Physical_Science_Sample.pdf',
   file_size: 14250000, // ~14.2 MB
   page_count: 148,
   language: 'Bilingual',
   status: 'ready',
   detected_chapters_count: 6,
+  is_demo: true,
   created_at: '2026-09-15T10:30:00Z',
 };
 
@@ -561,15 +562,16 @@ Hence, the heat generated quadruples (becomes four times).`,
 // ========================================================
 
 export const CLASS_VI_MATH_BOOK: DocumentItem = {
-  id: 'doc-class6-math',
+  id: 'doc-class6-math-sample',
   user_id: 'teacher-101',
-  title: 'Class VI Mathematics (NCERT & State Board)',
-  file_name: 'Class_VI_Mathematics_NCERT_Syllabus.pdf',
+  title: 'DEMO / SAMPLE — NOT FROM YOUR UPLOADED TEXTBOOK (Class VI Math)',
+  file_name: 'Sample_Class_VI_Mathematics_Demo.pdf',
   file_size: 18400000,
   page_count: 220,
   language: 'Bilingual',
   status: 'ready',
   detected_chapters_count: 8,
+  is_demo: true,
   created_at: '2026-09-28T09:00:00Z',
 };
 

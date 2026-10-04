@@ -108,11 +108,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                Section A (10M), B (20M), C (20M), D (20M)
+                Section A (10M), B (20M), C (24M), D (16M) · 32 Questions
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-                NCERT / WBBSE Syllabus Grounding
+                Verified Textbook Source Grounding
               </span>
             </div>
           </div>

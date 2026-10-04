@@ -113,25 +113,38 @@ export class ChapterDetectionService {
           document_id: documentId,
           title: topTitle,
         });
-
-        // Associated knowledge chunk
-        const relevantPages = extractedPages.filter(
-          (p) => p.pageNumber >= current.page && p.pageNumber <= pageEnd
-        );
-        const sampleText = relevantPages.map((p) => p.text).join('\n\n').slice(0, 1500) ||
-          `Key concepts regarding ${topTitle} within ${current.title}. Detailed principles, experimental observations, and definitions.`;
-
-        detectedChunks.push({
-          id: `chunk-${chapterId}-${tIdx + 1}`,
-          document_id: documentId,
-          chapter_id: chapterId,
-          topic_id: topicId,
-          page_start: current.page,
-          page_end: Math.min(current.page + 2, pageEnd),
-          text: sampleText,
-          extraction_confidence: 0.92,
-        });
       });
+
+      // Phase 3: Build real knowledge chunks from actual extracted physical pages
+      const chapterPages = extractedPages.filter(
+        (p) =>
+          p.pageNumber >= current.page &&
+          p.pageNumber <= pageEnd &&
+          p.text &&
+          p.text.trim().length > 0
+      );
+
+      if (chapterPages.length > 0) {
+        const chunkSize = 2; // 2 physical pages per chunk
+        for (let cIdx = 0; cIdx < chapterPages.length; cIdx += chunkSize) {
+          const group = chapterPages.slice(cIdx, cIdx + chunkSize);
+          const startP = group[0].pageNumber;
+          const endP = group[group.length - 1].pageNumber;
+          const actualText = group
+            .map((gp) => `[Page ${gp.pageNumber}]\n${gp.text.trim()}`)
+            .join('\n\n');
+
+          detectedChunks.push({
+            id: `chunk-${chapterId}-${Math.floor(cIdx / chunkSize) + 1}`,
+            document_id: documentId,
+            chapter_id: chapterId,
+            page_start: startP,
+            page_end: endP,
+            text: actualText,
+            extraction_confidence: 0.98,
+          });
+        }
+      }
     }
 
     return {

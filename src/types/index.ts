@@ -45,6 +45,7 @@ export interface DocumentItem {
   status: DocumentStatus;
   processing_step?: number; // 1 to 7 in pipeline
   detected_chapters_count: number;
+  is_demo?: boolean;
   created_at: string;
 }
 
@@ -93,6 +94,8 @@ export interface QuestionSource {
   page_end: number;
   source_text: string;
   source_confidence: number;
+  retrieved_chunk_ids?: string[];
+  is_real_pdf_grounded?: boolean;
 }
 
 export interface AnswerItem {
@@ -137,6 +140,7 @@ export interface QuestionItem {
   bloom_level: 'remember' | 'understand' | 'apply' | 'analyze' | 'evaluate' | 'create';
   language: Language;
   status: QuestionStatus;
+  source_grounding_status?: 'verified' | 'needs_review' | 'unverified';
   created_at: string;
   updated_at: string;
   // Embedded / joined properties for UX
@@ -169,7 +173,30 @@ export interface PipelineStep {
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
 }
 
-export type WeightageMode = 'exact_marks' | 'percentage' | 'equal';
+export type WeightageMode = 'ai_recommended' | 'exact_marks' | 'percentage' | 'equal';
+
+export interface ChapterAIAnalysis {
+  chapter_id: string;
+  chapter_title: string;
+  effective_pages: number;
+  page_volume_score: number; // 0-100 (30%)
+  importance_score: number; // 0-100 (30%)
+  chapter_relationship_score: number; // 0-100 (20%)
+  skill_breadth_score: number; // 0-100 (15%)
+  assessment_richness_score: number; // 0-100 (5%)
+  overall_score: number; // weighted sum (0-100)
+  importance_label: 'Essential Foundation' | 'High' | 'Moderate' | 'Supplementary';
+  short_reason: string;
+  raw_marks: number;
+  final_marks: number;
+  factor_notes: {
+    content_volume: string;
+    foundational_importance: string;
+    inter_chapter_relevance: string;
+    problem_solving_breadth: string;
+    assessment_richness: string;
+  };
+}
 
 export interface ChapterWeightage {
   chapter_id: string;
@@ -180,6 +207,7 @@ export interface ChapterWeightage {
   percentage: number;
   locked: boolean;
   assigned_questions_count: number;
+  ai_analysis?: ChapterAIAnalysis;
 }
 
 export interface SectionBlueprint {
@@ -223,9 +251,13 @@ export interface PaperHealth {
   allChaptersPassed: boolean;
   answerKeysCount: number;
   markingSchemesCount: number;
+  allMarkingSchemesSumValid: boolean;
+  invalidMarkingSchemeSlotNumbers: number[];
   duplicateCount: number;
   sourceGroundingPassed: boolean;
+  allSourceGroundingPassed: boolean;
   isReady: boolean;
+  healthIssues: string[];
 }
 
 export interface ClassVIExamPaper {
@@ -243,7 +275,8 @@ export interface ClassVIExamPaper {
   sections: SectionBlueprint[];
   slots: QuestionSlot[];
   paperHealth: PaperHealth;
-  status: 'draft' | 'configuring' | 'blueprint_ready' | 'generating' | 'ready';
+  aiAnalyses?: ChapterAIAnalysis[];
+  status: 'draft' | 'configuring' | 'blueprint_ready' | 'generating' | 'ready' | 'needs_review';
   created_at: string;
   updated_at: string;
 }

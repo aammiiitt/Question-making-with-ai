@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import multer from 'multer';
 import * as pdfParseModule from 'pdf-parse';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const pdfParse: any = (pdfParseModule as any).default || pdfParseModule;
 import { GoogleGenAI, Type } from '@google/genai';
@@ -174,6 +175,35 @@ Formulate ONE high quality, syllabus-accurate question strictly derived from the
     }
 
     const parsedJson = JSON.parse(textOutput);
+
+    // Hard Constraint Validation: Marking scheme marks sum must strictly equal question.marks
+    const targetMarks = Number(marks) || 1;
+    parsedJson.marks = targetMarks;
+
+    if (Array.isArray(parsedJson.marking_scheme) && parsedJson.marking_scheme.length > 0) {
+      let schemeSum = parsedJson.marking_scheme.reduce(
+        (sum: number, item: any) => sum + (Number(item.marks) || 0),
+        0
+      );
+      if (schemeSum !== targetMarks) {
+        // Attempt focused 1-step correction: adjust the last criterion
+        const diff = targetMarks - schemeSum;
+        const lastIdx = parsedJson.marking_scheme.length - 1;
+        if (parsedJson.marking_scheme[lastIdx].marks + diff > 0) {
+          parsedJson.marking_scheme[lastIdx].marks += diff;
+        } else {
+          // Fallback to single proportional criterion
+          parsedJson.marking_scheme = [
+            { criterion: 'Complete accurate solution with correct working steps', marks: targetMarks },
+          ];
+        }
+      }
+    } else {
+      parsedJson.marking_scheme = [
+        { criterion: 'Complete accurate solution with correct working steps', marks: targetMarks },
+      ];
+    }
+
     return res.json(parsedJson);
   } catch (error: any) {
     console.error('Error generating question with Gemini:', error);
@@ -186,7 +216,9 @@ Formulate ONE high quality, syllabus-accurate question strictly derived from the
 
 /**
  * Endpoint: POST /api/extract-pdf
- * Extracts text and pages from uploaded PDF
+ * Extracts text and pages from uploaded PDF using REAL per-page physical extraction.
+ * Never estimates page text by character position.
+ * Rejects scanned / image-only PDFs with OCR requirement message.
  */
 app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Response) => {
   try {
@@ -194,24 +226,44 @@ app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Re
       return res.status(400).json({ error: 'No PDF file was provided.' });
     }
 
-    const pdfBuffer = req.file.buffer;
-    const parsed = await pdfParse(pdfBuffer);
+    // Real per-page extraction via pdfjs-dist
+    const uint8Array = new Uint8Array(req.file.buffer);
+    const loadingTask = (pdfjsLib as any).getDocument({
+      data: uint8Array,
+      useSystemFonts: true,
+      disableFontFace: true,
+    });
 
-    // Approximate page splitting or full text
-    const fullText = parsed.text || '';
-    const numPages = parsed.numpages || 1;
+    const pdfDoc = await loadingTask.promise;
+    const numPages = pdfDoc.numPages || 1;
 
-    // Split text into estimated pages
     const pageChunks: { pageNumber: number; text: string }[] = [];
-    const avgPageLen = Math.max(200, Math.floor(fullText.length / numPages));
+    let totalExtractedChars = 0;
 
     for (let i = 1; i <= numPages; i++) {
-      const start = (i - 1) * avgPageLen;
-      const end = i === numPages ? fullText.length : i * avgPageLen;
-      const pageText = fullText.slice(start, end).trim();
+      const page = await pdfDoc.getPage(i);
+      const textContent = await page.getTextContent();
+      let pageText = '';
+      for (const item of textContent.items) {
+        if ('str' in item && typeof item.str === 'string') {
+          pageText += item.str + ' ';
+        }
+      }
+      const cleanText = pageText.replace(/\s+/g, ' ').trim();
+      totalExtractedChars += cleanText.length;
       pageChunks.push({
         pageNumber: i,
-        text: pageText.length > 20 ? pageText : `Page ${i} content`,
+        text: cleanText,
+      });
+    }
+
+    // Scanned / Image-Based PDF Detection:
+    // If total text across all pages is negligible (< 50 chars) or average per page < 15 chars
+    if (totalExtractedChars < 50 || totalExtractedChars / Math.max(1, numPages) < 15) {
+      return res.status(422).json({
+        success: false,
+        error:
+          'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.',
       });
     }
 
@@ -219,12 +271,13 @@ app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Re
       success: true,
       pageCount: numPages,
       pages: pageChunks,
-      info: parsed.info,
+      totalExtractedChars,
     });
   } catch (error: any) {
-    console.error('Error parsing PDF:', error);
+    console.error('Error parsing PDF with pdfjs-dist:', error);
     return res.status(500).json({
-      error: 'PDF could not be processed. We could not read enough text from this PDF. It may be scanned. OCR processing is required.',
+      error:
+        'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.',
       details: error.message,
     });
   }
@@ -232,7 +285,8 @@ app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Re
 
 /**
  * Endpoint: POST /api/detect-chapters
- * Uses Gemini to parse Table of Contents or intro pages to detect chapters
+ * Uses Gemini to parse Table of Contents or intro pages to detect chapters,
+ * and builds REAL knowledge chunks containing actual extracted PDF text.
  */
 app.post('/api/detect-chapters', async (req: Request, res: Response) => {
   try {
@@ -242,12 +296,13 @@ app.post('/api/detect-chapters', async (req: Request, res: Response) => {
     }
 
     const pagesText = (pages || [])
+      .slice(0, 20)
       .map((p: any) => `[Page ${p.pageNumber}]: ${p.text}`)
       .join('\n\n')
-      .slice(0, 10000);
+      .slice(0, 15000);
 
     const prompt = `Analyze the following initial pages of the textbook titled "${bookTitle}".
-Extract the list of chapters and estimated starting page numbers.
+Extract the exact list of chapters, their estimated start and end page numbers, and core topics.
 Pages:\n${pagesText}`;
 
     const response = await aiClient.models.generateContent({
@@ -298,7 +353,9 @@ Pages:\n${pagesText}`;
 
     rawChapters.forEach((rc: any, idx: number) => {
       const chapId = `chap-${documentId}-${rc.chapter_number || idx + 1}`;
-      const chapTopics = rc.topics?.length > 0 ? rc.topics : [`${rc.title} Key Laws`, `${rc.title} Problem Solving`];
+      const chapTopics =
+        rc.topics?.length > 0 ? rc.topics : [`${rc.title} Concepts`, `${rc.title} Practice`];
+
       chapTopics.forEach((tName: string, tIdx: number) => {
         const topId = `top-${chapId}-${tIdx + 1}`;
         topics.push({
@@ -307,23 +364,199 @@ Pages:\n${pagesText}`;
           document_id: documentId,
           title: tName,
         });
-        chunks.push({
-          id: `chunk-${chapId}-${tIdx + 1}`,
-          document_id: documentId,
-          chapter_id: chapId,
-          topic_id: topId,
-          page_start: rc.page_start,
-          page_end: rc.page_end,
-          text: `Extracted textbook material for ${tName} in Chapter ${rc.title}. Covers definitions, properties, and applications.`,
-          extraction_confidence: 0.95,
-        });
       });
+
+      // Strict Real Chunks: Gather ACTUAL text from physical pages within [page_start, page_end]
+      const chapterPages = (pages || []).filter(
+        (p: any) =>
+          p.pageNumber >= rc.page_start &&
+          p.pageNumber <= rc.page_end &&
+          p.text &&
+          p.text.trim().length > 0
+      );
+
+      if (chapterPages.length > 0) {
+        // Group into real chunks of 1-3 physical pages
+        const pageSize = 2;
+        for (let cIdx = 0; cIdx < chapterPages.length; cIdx += pageSize) {
+          const group = chapterPages.slice(cIdx, cIdx + pageSize);
+          const startP = group[0].pageNumber;
+          const endP = group[group.length - 1].pageNumber;
+          const actualText = group
+            .map((gp: any) => `[Page ${gp.pageNumber}]\n${gp.text}`)
+            .join('\n\n');
+
+          chunks.push({
+            id: `chunk-${chapId}-${Math.floor(cIdx / pageSize) + 1}`,
+            document_id: documentId,
+            chapter_id: chapId,
+            page_start: startP,
+            page_end: endP,
+            text: actualText,
+            extraction_confidence: 0.98,
+          });
+        }
+      }
     });
 
     return res.json({ chapters, topics, chunks });
   } catch (error: any) {
     console.error('Error detecting chapters:', error);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Endpoint: POST /api/analyze-chapter-weightage
+ * AI Intelligent Chapter Weightage Analysis for Class VI Mathematics
+ * Evaluates the 5 Factors:
+ * 1. Effective Content Volume / Page Coverage (30%)
+ * 2. Mathematical / Foundational Importance (30%)
+ * 3. Relationship to Other Chapters (20%)
+ * 4. Skill & Problem-Solving Breadth (15%)
+ * 5. Assessment Richness (5%)
+ * Returns structured scores and concise teacher explanations.
+ */
+app.post('/api/analyze-chapter-weightage', async (req: Request, res: Response) => {
+  try {
+    const { documentTitle, selectedChapters } = req.body;
+    if (!aiClient) {
+      return res.status(503).json({ error: 'Gemini client not initialized.' });
+    }
+
+    if (!Array.isArray(selectedChapters) || selectedChapters.length === 0) {
+      return res.status(400).json({ error: 'Please select at least one chapter for analysis.' });
+    }
+
+    const chaptersSummary = selectedChapters
+      .map((c: any, idx: number) => {
+        const pagesCount = Math.max(1, (c.page_end - c.page_start) + 1);
+        return `Chapter ${idx + 1}:
+ID: ${c.chapter_id}
+Title: ${c.chapter_title}
+Number: ${c.chapter_number || idx + 1}
+Page Range: ${c.page_start} - ${c.page_end} (${pagesCount} physical pages)
+Sample Textbook Text from Real Pages:
+${(c.sample_text || '').slice(0, 1800)}`;
+      })
+      .join('\n\n---\n\n');
+
+    const prompt = `You are a senior Class VI Mathematics academic supervisor preparing a 70-mark school examination question paper.
+Textbook: "${documentTitle || 'Class VI Mathematics'}"
+
+You must evaluate ONLY the following TEACHER-SELECTED chapters:
+
+${chaptersSummary}
+
+Analyze each chapter according to these 5 distinct factors:
+1. Effective Content Volume / Page Coverage (30% weightage):
+   Examine explanations, examples, exercises, worked problems, activities, and diagrams. Do not use page count blindly.
+2. Mathematical / Foundational Importance (30% weightage):
+   Evaluate fundamental conceptual significance for Class VI numeracy, integers, fractions, algebra, or geometry.
+3. Relationship to Other Chapters (20% weightage):
+   Assess whether this chapter is a prerequisite for others or has strong conceptual links.
+4. Skill & Problem-Solving Breadth (15% weightage):
+   Assess calculation, conceptual understanding, multi-step word problems, and construction.
+5. Assessment Richness (5% weightage):
+   Evaluate variety of assessable questions (1M, 2M, 3M, 4M).
+
+For each chapter, provide:
+- chapter_id (exact match from input)
+- chapter_title
+- effective_pages (estimated instructional/exercise page count)
+- page_volume_score (0-100)
+- importance_score (0-100)
+- chapter_relationship_score (0-100)
+- skill_breadth_score (0-100)
+- assessment_richness_score (0-100)
+- overall_score (formula: 0.30*page_volume_score + 0.30*importance_score + 0.20*chapter_relationship_score + 0.15*skill_breadth_score + 0.05*assessment_richness_score, rounded to 1 decimal place)
+- importance_label ("Essential Foundation", "High", "Moderate", "Supplementary")
+- short_reason (concise 1-2 sentence academic reason for the teacher)
+- factor_notes:
+  - content_volume: note on volume & worked examples
+  - foundational_importance: note on conceptual importance
+  - inter_chapter_relevance: note on prerequisites & connections
+  - problem_solving_breadth: note on problem types supported
+  - assessment_richness: note on question variety
+
+DO NOT generate final integer marks (the deterministic largest-remainder solver assigns marks). Return only scores and reasons.`;
+
+    const response = await aiClient.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: prompt,
+      config: {
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            chapters: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  chapter_id: { type: Type.STRING },
+                  chapter_title: { type: Type.STRING },
+                  effective_pages: { type: Type.NUMBER },
+                  page_volume_score: { type: Type.NUMBER },
+                  importance_score: { type: Type.NUMBER },
+                  chapter_relationship_score: { type: Type.NUMBER },
+                  skill_breadth_score: { type: Type.NUMBER },
+                  assessment_richness_score: { type: Type.NUMBER },
+                  overall_score: { type: Type.NUMBER },
+                  importance_label: {
+                    type: Type.STRING,
+                    enum: ['Essential Foundation', 'High', 'Moderate', 'Supplementary'],
+                  },
+                  short_reason: { type: Type.STRING },
+                  factor_notes: {
+                    type: Type.OBJECT,
+                    properties: {
+                      content_volume: { type: Type.STRING },
+                      foundational_importance: { type: Type.STRING },
+                      inter_chapter_relevance: { type: Type.STRING },
+                      problem_solving_breadth: { type: Type.STRING },
+                      assessment_richness: { type: Type.STRING },
+                    },
+                    required: [
+                      'content_volume',
+                      'foundational_importance',
+                      'inter_chapter_relevance',
+                      'problem_solving_breadth',
+                      'assessment_richness',
+                    ],
+                  },
+                },
+                required: [
+                  'chapter_id',
+                  'chapter_title',
+                  'effective_pages',
+                  'page_volume_score',
+                  'importance_score',
+                  'chapter_relationship_score',
+                  'skill_breadth_score',
+                  'assessment_richness_score',
+                  'overall_score',
+                  'importance_label',
+                  'short_reason',
+                  'factor_notes',
+                ],
+              },
+            },
+          },
+          required: ['chapters'],
+        },
+      },
+    });
+
+    const parsed = JSON.parse(response.text || '{}');
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error('Error analyzing chapter weightage:', error);
+    return res.status(500).json({
+      error: 'Chapter weightage analysis failed.',
+      details: error.message,
+    });
   }
 });
 

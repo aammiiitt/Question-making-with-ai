@@ -16,44 +16,54 @@ interface PaperHealthCardProps {
 
 export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
   const isMarksExact = health.totalMarksActual === health.totalMarksExpected;
-  const isQuestionsExact = health.totalQuestionsActual === health.totalQuestionsExpected;
+  const isQuestionsExact =
+    health.totalQuestionsActual === health.totalQuestionsExpected && health.totalQuestionsExpected > 0;
+
+  const isAuditNeedsReview = !health.isReady && isQuestionsExact;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-5 h-5 text-slate-800" />
           <div>
-            <h3 className="text-sm font-bold text-slate-900 tracking-tight">PAPER HEALTH AUDIT</h3>
+            <h3 className="text-sm font-bold text-slate-900 tracking-tight">STRICT PAPER HEALTH AUDIT</h3>
             <p className="text-[11px] text-slate-500">
-              Deterministic verification of 70-mark constraints, chapter targets & answer rubrics
+              Deterministic verification of 70-mark constraints, chapter targets, marking scheme sums & real textbook grounding
             </p>
           </div>
         </div>
 
         <span
-          className={`text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
+          className={`text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 self-start sm:self-auto ${
             health.isReady
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-              : 'bg-amber-50 text-amber-800 border border-amber-200'
+              ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+              : isAuditNeedsReview
+              ? 'bg-rose-50 text-rose-800 border border-rose-300'
+              : 'bg-amber-50 text-amber-800 border border-amber-300'
           }`}
         >
           {health.isReady ? (
             <>
-              <Check className="w-3.5 h-3.5" />
+              <Check className="w-3.5 h-3.5 text-emerald-600" />
               <span>Certified Ready</span>
+            </>
+          ) : isAuditNeedsReview ? (
+            <>
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+              <span>Needs Review</span>
             </>
           ) : (
             <>
-              <AlertTriangle className="w-3.5 h-3.5" />
-              <span>Audit Pending / Generating</span>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              <span>Generation Pending</span>
             </>
           )}
         </span>
       </div>
 
-      {/* Top 2 Global Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+      {/* Global Strict Metrics */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
         <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-100">
           <span className="text-[11px] text-slate-500 block font-medium">Total Marks</span>
           <div className="flex items-center justify-between mt-1">
@@ -83,20 +93,34 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
         </div>
 
         <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-100">
-          <span className="text-[11px] text-slate-500 block font-medium">Answer Keys & Rubrics</span>
+          <span className="text-[11px] text-slate-500 block font-medium">Marking Scheme Sums</span>
           <div className="flex items-center justify-between mt-1">
-            <span className="text-base font-bold text-slate-900">
-              {health.answerKeysCount} / {health.totalQuestionsExpected}
+            <span className="text-xs font-bold text-slate-900 truncate">
+              {health.allMarkingSchemesSumValid ? 'Exact Match' : 'Discrepancy'}
             </span>
-            {health.answerKeysCount === health.totalQuestionsExpected && health.totalQuestionsExpected > 0 ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            {health.allMarkingSchemesSumValid ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             ) : (
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
             )}
           </div>
         </div>
 
         <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-100">
+          <span className="text-[11px] text-slate-500 block font-medium">Source Grounding</span>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-xs font-bold text-slate-900 truncate">
+              {health.allSourceGroundingPassed ? '100% Grounded' : 'Needs Review'}
+            </span>
+            {health.allSourceGroundingPassed ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+            )}
+          </div>
+        </div>
+
+        <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-100 col-span-2 sm:col-span-1">
           <span className="text-[11px] text-slate-500 block font-medium">Duplicate Questions</span>
           <div className="flex items-center justify-between mt-1">
             <span className="text-base font-bold text-slate-900">
@@ -110,6 +134,21 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
           </div>
         </div>
       </div>
+
+      {/* Health Issues List if not Ready */}
+      {health.healthIssues && health.healthIssues.length > 0 && !health.isReady && (
+        <div className="p-3.5 bg-rose-50/80 border border-rose-200 rounded-xl text-xs space-y-1.5 text-rose-950">
+          <span className="font-bold flex items-center gap-1.5 text-rose-900">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>Audit Findings (Must Be Resolved for Paper Certification):</span>
+          </span>
+          <ul className="list-disc pl-5 space-y-0.5 text-rose-800 text-[11px]">
+            {health.healthIssues.map((issue, idx) => (
+              <li key={idx}>{issue}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Chapter-wise Breakdown Verification */}
       <div className="pt-2">

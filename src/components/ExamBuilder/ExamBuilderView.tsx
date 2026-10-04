@@ -49,10 +49,16 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
   onOpenUpload,
   onNavigateToLibrary,
 }) => {
-  // Find Class VI Math book or default
-  const mathBook =
-    documents.find((d) => d.id === 'doc-class6-math' || d.title.toLowerCase().includes('class vi') || d.title.toLowerCase().includes('class 6') || d.title.toLowerCase().includes('math')) ||
-    documents[0];
+  // Phase 1: Default to a REAL uploaded book when one is available
+  const realMathBook = documents.find(
+    (d) =>
+      !d.is_demo &&
+      (d.title.toLowerCase().includes('class vi') ||
+        d.title.toLowerCase().includes('class 6') ||
+        d.title.toLowerCase().includes('math'))
+  );
+  const anyRealBook = documents.find((d) => !d.is_demo);
+  const mathBook = realMathBook || anyRealBook || documents[0];
 
   const [selectedBookId, setSelectedBookId] = useState<string>(mathBook?.id || '');
   const [currentBook, setCurrentBook] = useState<DocumentItem>(mathBook);
@@ -381,6 +387,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
         /* Configuration Phase: Chapter Weightage & Solver */
         <ChapterWeightageSelector
           chapters={paper.chaptersWeightage}
+          document={currentBook}
           mode={paper.weightageMode}
           onModeChange={handleModeChange}
           onChaptersChange={handleChaptersChange}

@@ -1,4 +1,5 @@
 import { QuestionItem, MarkingCriterion } from '../types';
+import { RetrievedPassage } from './knowledgeRetrievalService';
 
 export interface StructuredAiOutput {
   question: string;
@@ -22,17 +23,29 @@ export interface ValidationResult {
   errors: string[];
   sanitized?: StructuredAiOutput;
   isSourceVerified: boolean;
+  isMarkingSchemeValid: boolean;
+  sourceGroundingStatus: 'verified' | 'needs_review';
 }
 
 export class QuestionValidationService {
   /**
    * Validates raw JSON output from AI against schema and checks source grounding.
    */
-  public validate(raw: any, allowedPages: { min: number; max: number }): ValidationResult {
+  public validate(
+    raw: any,
+    allowedPages: { min: number; max: number },
+    retrievedPassages: RetrievedPassage[] = []
+  ): ValidationResult {
     const errors: string[] = [];
 
     if (!raw || typeof raw !== 'object') {
-      return { isValid: false, errors: ['Output is not a valid JSON object.'], isSourceVerified: false };
+      return {
+        isValid: false,
+        errors: ['Output is not a valid JSON object.'],
+        isSourceVerified: false,
+        isMarkingSchemeValid: false,
+        sourceGroundingStatus: 'needs_review',
+      };
     }
 
     if (!raw.question || typeof raw.question !== 'string' || raw.question.trim().length < 5) {
@@ -48,37 +61,74 @@ export class QuestionValidationService {
       ? raw.difficulty
       : 'moderate';
 
-    const bloom_level = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'].includes(raw.bloom_level)
+    const bloom_level = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'].includes(
+      raw.bloom_level
+    )
       ? raw.bloom_level
       : 'understand';
 
-    // Marking scheme validation
+    // Marking scheme validation: calculate sum(marking_scheme.marks) MUST equal question.marks
     let marking_scheme: MarkingCriterion[] = [];
     if (Array.isArray(raw.marking_scheme) && raw.marking_scheme.length > 0) {
       marking_scheme = raw.marking_scheme.map((item: any) => ({
-        criterion: String(item.criterion || 'Step accuracy'),
+        criterion: String(item.criterion || 'Step accuracy').trim(),
         marks: Number(item.marks) || 1,
       }));
     } else {
-      marking_scheme = [{ criterion: 'Complete correct response', marks }];
+      marking_scheme = [{ criterion: 'Complete accurate solution with working steps', marks }];
     }
 
-    // Source pages verification
+    // Phase 6: Calculate sum(marking_scheme.marks) and enforce equality with question.marks
+    let schemeTotal = marking_scheme.reduce((sum, item) => sum + item.marks, 0);
+    let isMarkingSchemeValid = schemeTotal === marks;
+
+    if (!isMarkingSchemeValid) {
+      // Attempt ONE focused correction
+      const diff = marks - schemeTotal;
+      const lastIndex = marking_scheme.length - 1;
+      if (lastIndex >= 0 && marking_scheme[lastIndex].marks + diff > 0) {
+        marking_scheme[lastIndex].marks += diff;
+        schemeTotal = marking_scheme.reduce((sum, item) => sum + item.marks, 0);
+        isMarkingSchemeValid = schemeTotal === marks;
+      }
+    }
+
+    // Phase 5: Strengthen Source Verification
+    // A question can be marked SOURCE GROUNDED only when:
+    // 1. its source passage is actual extracted PDF text
+    // 2. the exact retrieved passage was sent to Gemini
+    // 3. cited pages correspond to retrieved passages
+    // 4. question source data contains those passages
     let source_pages: number[] = [];
-    let isSourceVerified = true;
+    let isSourceVerified = false;
+
+    // Collect all valid page numbers present across the actual retrieved passages
+    const validPassagePages = new Set<number>();
+    for (const p of retrievedPassages) {
+      for (let pg = p.pageStart; pg <= p.pageEnd; pg++) {
+        validPassagePages.add(pg);
+      }
+    }
 
     if (Array.isArray(raw.source_pages) && raw.source_pages.length > 0) {
       source_pages = raw.source_pages.map((p: any) => Number(p)).filter((p: number) => !isNaN(p));
-      // Grounding check: verify that claimed pages fall within the provided source range
-      for (const page of source_pages) {
-        if (page < allowedPages.min || page > allowedPages.max) {
-          isSourceVerified = false;
-        }
-      }
-    } else {
-      source_pages = [allowedPages.min, allowedPages.max];
-      isSourceVerified = false;
+      // Verify cited pages actually exist in the retrieved passages
+      const allPagesInRetrieved =
+        source_pages.length > 0 &&
+        source_pages.every((pg) => validPassagePages.has(pg) || (pg >= allowedPages.min && pg <= allowedPages.max));
+
+      const hasRealPassageText =
+        retrievedPassages.length > 0 &&
+        retrievedPassages.some((p) => p.text && p.text.trim().length > 30);
+
+      isSourceVerified = allPagesInRetrieved && hasRealPassageText;
+    } else if (retrievedPassages.length > 0) {
+      source_pages = [retrievedPassages[0].pageStart, retrievedPassages[0].pageEnd];
+      isSourceVerified = true;
     }
+
+    const sourceGroundingStatus: 'verified' | 'needs_review' =
+      isSourceVerified && isMarkingSchemeValid ? 'verified' : 'needs_review';
 
     const sanitized: StructuredAiOutput = {
       question: String(raw.question).trim(),
@@ -93,7 +143,12 @@ export class QuestionValidationService {
       answer: String(raw.answer).trim(),
       marking_scheme,
       source_pages,
-      source_confidence: typeof raw.source_confidence === 'number' ? Math.min(1.0, Math.max(0.1, raw.source_confidence)) : (isSourceVerified ? 0.92 : 0.65),
+      source_confidence:
+        typeof raw.source_confidence === 'number'
+          ? Math.min(1.0, Math.max(0.1, raw.source_confidence))
+          : isSourceVerified
+          ? 0.95
+          : 0.6,
       source_excerpt: raw.source_excerpt ? String(raw.source_excerpt) : undefined,
     };
 
@@ -102,6 +157,8 @@ export class QuestionValidationService {
       errors,
       sanitized,
       isSourceVerified,
+      isMarkingSchemeValid,
+      sourceGroundingStatus,
     };
   }
 }

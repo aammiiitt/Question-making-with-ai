@@ -43,10 +43,9 @@ export class DocumentProcessingService {
     // Step 2: Text extracted
     updateStep(1, 'in_progress');
     let extractedPages: { pageNumber: number; text: string }[] = [];
-    let pageCount = 64;
+    let pageCount = 0;
 
     try {
-      // Send to server /api/extract-pdf if file size allows
       const formData = new FormData();
       formData.append('file', file);
 
@@ -55,27 +54,43 @@ export class DocumentProcessingService {
         body: formData,
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        extractedPages = data.pages || [];
-        pageCount = data.pageCount || extractedPages.length || 64;
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        updateStep(1, 'failed');
+        throw new Error(
+          errData.error ||
+            'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.'
+        );
       }
-    } catch (e) {
-      console.warn('Backend PDF extract endpoint unreachable or offline:', e);
+
+      const data = await res.json();
+      extractedPages = data.pages || [];
+      pageCount = data.pageCount || extractedPages.length;
+    } catch (e: any) {
+      updateStep(1, 'failed');
+      throw new Error(
+        e.message ||
+          'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.'
+      );
     }
 
-    if (extractedPages.length === 0) {
-      // Generate synthetic structured representation of textbook pages for parsing
-      pageCount = Math.max(24, Math.min(180, Math.round(file.size / 75000)));
-      for (let p = 1; p <= pageCount; p++) {
-        extractedPages.push({
-          pageNumber: p,
-          text: `Page ${p}: Principles of ${file.name.replace(/\.pdf$/i, '')}. Textbook content, definitions, and equations covering unit topics.`,
-        });
-      }
+    const totalExtractedChars = extractedPages.reduce(
+      (sum, p) => sum + (p.text ? p.text.trim().length : 0),
+      0
+    );
+
+    if (
+      extractedPages.length === 0 ||
+      totalExtractedChars < 50 ||
+      totalExtractedChars / Math.max(1, extractedPages.length) < 15
+    ) {
+      updateStep(1, 'failed');
+      throw new Error(
+        'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.'
+      );
     }
 
-    await new Promise((r) => setTimeout(r, 700));
+    await new Promise((r) => setTimeout(r, 600));
     updateStep(1, 'completed');
 
     // Step 3: Pages identified
