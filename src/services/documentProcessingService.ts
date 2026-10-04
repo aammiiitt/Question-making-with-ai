@@ -5,11 +5,11 @@ import { storageService } from './storageService';
 export const PIPELINE_STEPS: { step: number; name: string; description: string }[] = [
   { step: 1, name: 'File uploaded', description: 'Verifying PDF structure and integrity' },
   { step: 2, name: 'Text extracted', description: 'Parsing textual layers across all pages' },
-  { step: 3, name: 'Pages identified', description: 'Cataloging page boundaries and layout' },
+  { step: 3, name: 'Pages identified', description: 'Cataloging page boundaries and text coverage' },
   { step: 4, name: 'Chapters detected', description: 'Identifying chapter headers and units' },
   { step: 5, name: 'Topics detected', description: 'Extracting subtopics and learning objectives' },
   { step: 6, name: 'Knowledge indexed', description: 'Creating semantic chunk embeddings' },
-  { step: 7, name: 'Ready', description: 'Ready for source-grounded question generation' },
+  { step: 7, name: 'Ready', description: 'Textbook processed and indexed' },
 ];
 
 export class DocumentProcessingService {
@@ -93,10 +93,52 @@ export class DocumentProcessingService {
     await new Promise((r) => setTimeout(r, 600));
     updateStep(1, 'completed');
 
-    // Step 3: Pages identified
+    // Step 3: Pages identified & Page-level coverage check
     updateStep(2, 'in_progress');
     // Save physical pages to storage for subsequent verification and re-indexing
     storageService.saveDocumentPages(docId, extractedPages);
+
+    // Compute deterministic page-level coverage check
+    let usablePagesCount = 0;
+    let attentionPagesCount = 0;
+    let totalExtractedWords = 0;
+
+    const pageCoverageRecords = extractedPages.map((p) => {
+      const text = p.text ? p.text.trim() : '';
+      const charCount = text.length;
+      const words = text ? text.split(/\s+/).filter(Boolean) : [];
+      const wordCount = words.length;
+      totalExtractedWords += wordCount;
+
+      const hasUsableText = charCount >= 100 && wordCount >= 15;
+      let extractionStatus: 'read' | 'low_text' | 'empty' | 'failed' = 'read';
+      let flagReason: string | undefined = undefined;
+
+      if (charCount < 20) {
+        extractionStatus = 'empty';
+        flagReason = 'No extractable text — page may contain scanned text, illustrations, blank page, or full-page geometry diagram.';
+        attentionPagesCount++;
+      } else if (charCount < 150 || wordCount < 20) {
+        extractionStatus = 'low_text';
+        flagReason = 'Low text detected — page may contain mathematical diagrams, formulas, tables, or section headers only.';
+        attentionPagesCount++;
+      } else {
+        usablePagesCount++;
+      }
+
+      return {
+        pageNumber: p.pageNumber,
+        characterCount: charCount,
+        wordCount,
+        hasUsableText,
+        extractionStatus,
+        flagReason,
+      };
+    });
+
+    storageService.savePageCoverage(docId, pageCoverageRecords);
+    const coveragePercentage = Number(((usablePagesCount / Math.max(1, pageCount)) * 100).toFixed(1));
+
     await new Promise((r) => setTimeout(r, 500));
     updateStep(2, 'completed');
 
@@ -142,9 +184,15 @@ export class DocumentProcessingService {
       file_size: file.size,
       page_count: pageCount,
       language: 'English',
-      status: needsReview ? 'needs_review' : 'ready',
+      status: needsReview ? 'needs_review' : 'needs_review', // All real books require teacher verification and confirmation
       processing_step: 7,
       detected_chapters_count: detectionResult.chapters.length,
+      teacher_confirmed: false, // Locked until teacher confirms mapping!
+      total_extracted_chars: totalExtractedChars,
+      total_words: totalExtractedWords,
+      usable_pages_count: usablePagesCount,
+      attention_pages_count: attentionPagesCount,
+      coverage_percentage: coveragePercentage,
       created_at: new Date().toISOString(),
     };
 

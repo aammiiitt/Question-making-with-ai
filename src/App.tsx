@@ -90,7 +90,7 @@ export default function App() {
     refreshData();
     setSelectedBookIdForDetails(newDoc.id);
     setActiveTab('book_details');
-    showToast(`"${newDoc.title}" processed with ${newDoc.detected_chapters_count} detected chapters.`);
+    showToast(`"${newDoc.title}" processed & indexed. Please verify chapter mapping.`);
   };
 
   const handleResetData = () => {
@@ -186,6 +186,11 @@ export default function App() {
               chunks={currentChunks}
               onBack={() => setActiveTab('library')}
               onGenerateForChapter={handleGenerateForChapter}
+              onNavigateToExamBuilder={() => setActiveTab('exam_builder')}
+              onConfirmSuccess={(updatedDoc, updatedChapters) => {
+                refreshData();
+                showToast(`Textbook "${updatedDoc.title}" confirmed! Exam generation unlocked.`);
+              }}
               onSaveChapter={(chap) => {
                 storageService.saveChapter(chap);
                 refreshData();

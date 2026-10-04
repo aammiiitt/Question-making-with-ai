@@ -78,6 +78,15 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
     const selected = list.filter((c) => c.included);
     if (selected.length === 0) return;
 
+    // Requirement 9: AI weightage must only operate on confirmed chapters
+    if (!document.teacher_confirmed && !document.is_demo) {
+      setAnalysisStatus('failed');
+      setAnalysisError(
+        'AI chapter weightage analysis requires confirmed textbook chapter mappings. Please verify physical PDF page ranges first.'
+      );
+      return;
+    }
+
     setAnalysisStatus('analyzing');
     setAnalysisError(null);
     try {
@@ -819,38 +828,87 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
 
       {/* Action Footer */}
       {(() => {
+        const isConfirmed = !!document.teacher_confirmed || !!document.is_demo;
+        const docChapters = storageService.getChapters(document.id);
+
+        const unverifiedChapters = includedChapters.filter((c) => {
+          const found = docChapters.find((dc) => dc.id === c.chapter_id);
+          return found?.status === 'needs_review';
+        });
+
+        const emptyChunkChapters = includedChapters.filter((c) => {
+          const chks = storageService.getChunks(document.id, c.chapter_id);
+          return chks.length === 0;
+        });
+
         const isAiReady =
           mode !== 'ai_recommended' ||
           (analysisStatus === 'success' && aiAnalyses.length >= includedChapters.length);
-        const canProceed = isExact70 && isAiReady && analysisStatus !== 'analyzing';
+
+        let lockReason: string | null = null;
+        if (!isConfirmed) {
+          lockReason = 'Exam generation locked: Chapter mapping has not been confirmed by teacher.';
+        } else if (unverifiedChapters.length > 0) {
+          lockReason = `Exam generation locked: Chapter "${unverifiedChapters[0].chapter_title}" has unverified page ranges.`;
+        } else if (emptyChunkChapters.length > 0) {
+          lockReason = `Exam generation locked: Chapter "${emptyChunkChapters[0].chapter_title}" has 0 knowledge chunks.`;
+        } else if (!isExact70) {
+          lockReason = `Exam generation locked: Chapter weightage must total exactly 70 marks (currently ${currentTotalMarks}M).`;
+        } else if (!isAiReady) {
+          lockReason = 'Exam generation locked: AI chapter weightage analysis must be completed and approved.';
+        }
+
+        const canProceed = lockReason === null && analysisStatus !== 'analyzing';
 
         return (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-            <div className="text-xs text-slate-500">
-              {includedChapters.length} chapters selected · Every question slot strictly constrained
-            </div>
+          <div className="space-y-3 pt-2">
+            {lockReason && (
+              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-950">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span className="font-bold">{lockReason}</span>
+                </div>
+                {!isConfirmed && onOpenVerificationModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenVerificationModal}
+                    className="px-3 py-1.5 bg-amber-950 hover:bg-amber-900 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer"
+                  >
+                    Verify & Confirm Chapters
+                  </button>
+                )}
+              </div>
+            )}
 
-            <button
-              type="button"
-              disabled={!canProceed}
-              onClick={onSolveAndProceed}
-              className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer ${
-                canProceed
-                  ? 'bg-slate-900 text-white hover:bg-slate-800 active:scale-98'
-                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              <span>
-                {analysisStatus === 'analyzing'
-                  ? 'Evaluating Chapter Weightage with Gemini...'
-                  : analysisStatus === 'failed' && mode === 'ai_recommended'
-                  ? 'AI Analysis Required (Retry Above)'
-                  : mode === 'ai_recommended'
-                  ? 'Accept AI Weightage & Allocate Question Slots'
-                  : 'Solve Blueprint & Allocate Question Slots'}
-              </span>
-              <ArrowRight className="w-4 h-4 text-amber-400" />
-            </button>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-slate-500">
+                {includedChapters.length} chapters selected · Every question slot strictly constrained
+              </div>
+
+              <button
+                type="button"
+                disabled={!canProceed}
+                onClick={onSolveAndProceed}
+                className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                  canProceed
+                    ? 'bg-slate-900 text-white hover:bg-slate-800 active:scale-98'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                <span>
+                  {!isConfirmed
+                    ? 'Exam Generation Locked (Confirmation Required)'
+                    : analysisStatus === 'analyzing'
+                    ? 'Evaluating Chapter Weightage with Gemini...'
+                    : analysisStatus === 'failed' && mode === 'ai_recommended'
+                    ? 'AI Analysis Required (Retry Above)'
+                    : mode === 'ai_recommended'
+                    ? 'Accept AI Weightage & Allocate Question Slots'
+                    : 'Solve Blueprint & Allocate Question Slots'}
+                </span>
+                <ArrowRight className="w-4 h-4 text-amber-400" />
+              </button>
+            </div>
           </div>
         );
       })()}

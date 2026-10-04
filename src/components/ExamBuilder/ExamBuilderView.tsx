@@ -224,19 +224,19 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
       }
     }
 
-    // 3. Mark document ready if it was needs_review
-    if (currentBook.status === 'needs_review') {
-      const updatedDoc: DocumentItem = {
-        ...currentBook,
-        status: 'ready',
-        detected_chapters_count: verifiedChapters.length,
-      };
-      storageService.saveDocument(updatedDoc);
-      setCurrentBook(updatedDoc);
-    }
+    // 3. Mark document verified and confirmed by teacher
+    const updatedDoc: DocumentItem = {
+      ...currentBook,
+      status: 'ready',
+      teacher_confirmed: true,
+      teacher_confirmed_at: new Date().toISOString(),
+      detected_chapters_count: verifiedChapters.length,
+    };
+    storageService.saveDocument(updatedDoc);
+    setCurrentBook(updatedDoc);
 
     // 4. Update paper weightage and slots with verified chapters
-    const updatedPaper = examPaperService.getOrCreatePaper(currentBook, verifiedChapters);
+    const updatedPaper = examPaperService.getOrCreatePaper(updatedDoc, verifiedChapters);
     setPaper(updatedPaper);
     setSolverDeficiency(null);
   };
@@ -300,6 +300,12 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
 
   const handleStartGeneration = async () => {
     setIsReviewModalOpen(false);
+
+    if (!currentBook?.teacher_confirmed && !currentBook?.is_demo) {
+      setIsVerificationModalOpen(true);
+      return;
+    }
+
     setIsGeneratingPaper(true);
     setGenerationProgress(0);
 
@@ -478,6 +484,33 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
           </select>
         )}
       </div>
+
+      {/* Requirement 8 & 10: Teacher Confirmation Lock Banner */}
+      {!currentBook.teacher_confirmed && !currentBook.is_demo && (
+        <div className="p-4 bg-amber-50/90 border border-amber-300 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0 mt-0.5 border border-amber-200">
+              <Lock className="w-4 h-4 text-amber-800" />
+            </div>
+            <div>
+              <span className="font-extrabold text-amber-950 text-sm block">
+                EXAM GENERATION LOCKED: Pending Teacher Confirmation
+              </span>
+              <p className="text-amber-900 text-xs mt-0.5 leading-relaxed">
+                Textbook processing completed. Please verify chapter page ranges and confirm textbook before generating examination.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsVerificationModalOpen(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-amber-950 hover:bg-amber-900 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer shrink-0 shadow-xs"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+            <span>Verify & Confirm Chapters</span>
+          </button>
+        </div>
+      )}
 
       {/* PAPER HEALTH CARD (When slots exist) */}
       {paper.slots.length > 0 && (

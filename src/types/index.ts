@@ -33,6 +33,33 @@ export interface User {
   created_at: string;
 }
 
+export interface PageCoverageRecord {
+  pageNumber: number;
+  characterCount: number;
+  wordCount: number;
+  hasUsableText: boolean;
+  extractionStatus: 'read' | 'low_text' | 'empty' | 'failed';
+  flagReason?: string;
+}
+
+export interface ChapterProcessingReport {
+  chapterId: string;
+  chapterNumber: number;
+  chapterTitle: string;
+  pageStart: number;
+  pageEnd: number;
+  totalPages: number;
+  usablePagesCount: number;
+  attentionPages: number[];
+  chunkCount: number;
+  approxWords: number;
+  topics: string[];
+  status: 'read' | 'verify';
+  beginningSample: string;
+  middleSample: string;
+  endingSample: string;
+}
+
 export interface DocumentItem {
   id: string;
   user_id: string;
@@ -46,6 +73,13 @@ export interface DocumentItem {
   processing_step?: number; // 1 to 7 in pipeline
   detected_chapters_count: number;
   is_demo?: boolean;
+  teacher_confirmed?: boolean;
+  teacher_confirmed_at?: string;
+  total_extracted_chars?: number;
+  total_words?: number;
+  usable_pages_count?: number;
+  attention_pages_count?: number;
+  coverage_percentage?: number;
   created_at: string;
 }
 

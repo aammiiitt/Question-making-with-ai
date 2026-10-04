@@ -20,6 +20,13 @@ export const DEMO_BOOK: DocumentItem = {
   status: 'ready',
   detected_chapters_count: 6,
   is_demo: true,
+  teacher_confirmed: true,
+  teacher_confirmed_at: '2026-09-15T10:30:00Z',
+  total_extracted_chars: 120500,
+  total_words: 18200,
+  usable_pages_count: 154,
+  attention_pages_count: 6,
+  coverage_percentage: 96.3,
   created_at: '2026-09-15T10:30:00Z',
 };
 
@@ -572,6 +579,13 @@ export const CLASS_VI_MATH_BOOK: DocumentItem = {
   status: 'ready',
   detected_chapters_count: 8,
   is_demo: true,
+  teacher_confirmed: true,
+  teacher_confirmed_at: '2026-09-28T09:00:00Z',
+  total_extracted_chars: 168000,
+  total_words: 24500,
+  usable_pages_count: 216,
+  attention_pages_count: 4,
+  coverage_percentage: 98.2,
   created_at: '2026-09-28T09:00:00Z',
 };
 

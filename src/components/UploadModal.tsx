@@ -285,20 +285,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
                 <div className="flex items-center gap-2 text-emerald-950 font-semibold text-xs">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Processing complete! Textbook is ready.</span>
+                  <span>Textbook processed and indexed! Software proofs & coverage ready.</span>
                 </div>
                 <div className="text-xs text-emerald-800 flex items-center gap-3">
                   <span>{completedDoc.detected_chapters_count} Chapters detected</span>
                   <span>·</span>
-                  <span>{completedDoc.page_count} Pages indexed</span>
+                  <span>{completedDoc.page_count} Physical PDF Pages indexed</span>
                 </div>
+                <p className="text-[11px] text-emerald-900 mt-1">
+                  Next Step: Review the Textbook Processing & Verification Report and verify physical chapter page numbers before exam generation.
+                </p>
                 <div className="pt-2 flex items-center justify-end gap-2">
                   <button
                     onClick={handleDone}
                     className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition-colors shadow-sm cursor-pointer"
                   >
                     <BookOpen className="w-3.5 h-3.5" />
-                    <span>View Chapters & Generate</span>
+                    <span>View Processing Report & Verify Mapping</span>
                   </button>
                 </div>
               </div>

@@ -1,4 +1,13 @@
-import { DocumentItem, Chapter, Topic, KnowledgeChunk, QuestionItem, QuestionFeedback, User } from '../types';
+import {
+  DocumentItem,
+  Chapter,
+  Topic,
+  KnowledgeChunk,
+  QuestionItem,
+  QuestionFeedback,
+  User,
+  PageCoverageRecord,
+} from '../types';
 import {
   DEMO_BOOK,
   DEMO_CHAPTERS,
@@ -21,6 +30,7 @@ const STORAGE_KEYS = {
   USER: 'ai_qpm_user',
   DOCUMENTS: 'ai_qpm_documents',
   DOCUMENT_PAGES: 'ai_qpm_document_pages',
+  PAGE_COVERAGE: 'ai_qpm_page_coverage',
   CHAPTERS: 'ai_qpm_chapters',
   TOPICS: 'ai_qpm_topics',
   CHUNKS: 'ai_qpm_chunks',
@@ -129,6 +139,68 @@ class StorageService {
     } catch {
       return [];
     }
+  }
+
+  public savePageCoverage(docId: string, records: PageCoverageRecord[]): void {
+    if (!this.isBrowser()) return;
+    try {
+      const store = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAGE_COVERAGE) || '{}');
+      store[docId] = records;
+      localStorage.setItem(STORAGE_KEYS.PAGE_COVERAGE, JSON.stringify(store));
+    } catch (e) {
+      console.warn('Could not save page coverage records to localStorage:', e);
+    }
+  }
+
+  public getPageCoverage(docId: string): PageCoverageRecord[] {
+    if (!this.isBrowser()) return [];
+    try {
+      const store = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAGE_COVERAGE) || '{}');
+      if (store[docId] && Array.isArray(store[docId])) {
+        return store[docId];
+      }
+    } catch {
+      // ignore
+    }
+
+    // Compute dynamically from stored document pages if cached records don't exist
+    const rawPages = this.getDocumentPages(docId);
+    if (rawPages.length > 0) {
+      const computed: PageCoverageRecord[] = rawPages.map((p) => {
+        const text = p.text ? p.text.trim() : '';
+        const characterCount = text.length;
+        const words = text ? text.split(/\s+/).filter(Boolean) : [];
+        const wordCount = words.length;
+        const hasUsableText = characterCount >= 100 && wordCount >= 15;
+
+        let extractionStatus: 'read' | 'low_text' | 'empty' | 'failed' = 'read';
+        let flagReason: string | undefined = undefined;
+
+        if (characterCount < 20) {
+          extractionStatus = 'empty';
+          flagReason =
+            'No extractable text — page may contain scanned text, illustrations, blank page, or full-page geometry diagram.';
+        } else if (characterCount < 150 || wordCount < 20) {
+          extractionStatus = 'low_text';
+          flagReason =
+            'Low text detected — may contain mathematical diagrams, formulas, tables, or section headers only.';
+        }
+
+        return {
+          pageNumber: p.pageNumber,
+          characterCount,
+          wordCount,
+          hasUsableText,
+          extractionStatus,
+          flagReason,
+        };
+      });
+
+      this.savePageCoverage(docId, computed);
+      return computed;
+    }
+
+    return [];
   }
 
   public replaceChunksForDocument(docId: string, newChunks: KnowledgeChunk[]): void {
