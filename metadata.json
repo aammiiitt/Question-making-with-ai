@@ -1,0 +1,6 @@
+{
+  "name": "AI Question Paper Maker",
+  "description": "AI-powered source-grounded question paper maker and assessment assistant for teachers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
