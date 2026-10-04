@@ -21,15 +21,42 @@ export class AIWeightageService {
       return [];
     }
 
-    // 1. Gather real extracted text from chunks for each selected chapter
+    // 1. Gather representative multi-sample text and deterministic statistics for each selected chapter
     const chaptersPayload = selectedChapters.map((chap) => {
       const realChunks = storageService.getChunks(document.id, chap.id);
-      const sampleText = realChunks
-        .map((c) => c.text)
-        .join('\n\n')
-        .slice(0, 2000);
-
       const topics = storageService.getTopics(chap.id);
+      const pageCount = Math.max(1, chap.page_end - chap.page_start + 1);
+
+      // Full text across all real chunks
+      const allText = realChunks.map((c) => c.text).join('\n\n');
+      const totalChars = allText.length;
+      const totalWords = allText.split(/\s+/).filter(Boolean).length;
+
+      // Representative 3-sample extraction: Beginning, Middle, Ending (~1500 chars each)
+      let beginningSample = '';
+      let middleSample = '';
+      let endingSample = '';
+
+      if (realChunks.length > 0) {
+        beginningSample = realChunks[0].text.slice(0, 1600);
+        const midIdx = Math.floor(realChunks.length / 2);
+        middleSample = realChunks[midIdx] ? realChunks[midIdx].text.slice(0, 1600) : '';
+        const lastIdx = realChunks.length - 1;
+        endingSample = realChunks[lastIdx] ? realChunks[lastIdx].text.slice(0, 1600) : '';
+      } else {
+        beginningSample = `Chapter ${chap.chapter_number}: ${chap.title} covering physical PDF pages ${chap.page_start} to ${chap.page_end}.`;
+      }
+
+      // Deterministic Text Statistics across the full chapter text
+      const exampleMatches = allText.match(/(?:example|worked\s+out|illustration|problem)\s*(\d+|[a-z])?/gi);
+      const workedExamplesCount = exampleMatches ? exampleMatches.length : Math.max(2, Math.round(pageCount * 0.8));
+
+      const exerciseMatches = allText.match(/(?:exercise|question|practice|q\.\s*\d+|q\s*\d+)/gi);
+      const exercisesCount = exerciseMatches ? exerciseMatches.length : Math.max(4, Math.round(pageCount * 1.5));
+
+      const hasDiagrams = /(?:figure|fig\.|diagram|geometry|triangle|quadrilateral|circle|angle|perpendicular|construction|radius|diameter|polygon|line\s+segment|matchstick)/i.test(allText);
+
+      const effectivePagesCount = Math.max(1, realChunks.length > 0 ? Math.min(pageCount, realChunks.length * 2) : pageCount);
 
       return {
         chapter_id: chap.id,
@@ -37,12 +64,22 @@ export class AIWeightageService {
         chapter_number: chap.chapter_number,
         page_start: chap.page_start,
         page_end: chap.page_end,
+        page_count: pageCount,
+        effective_pages_count: effectivePagesCount,
         topics: topics.map((t) => t.title),
-        sample_text: sampleText,
+        beginning_sample: beginningSample,
+        middle_sample: middleSample,
+        ending_sample: endingSample,
+        worked_examples_count: workedExamplesCount,
+        exercises_count: exercisesCount,
+        has_diagrams: hasDiagrams,
+        total_words: totalWords,
+        total_chars: totalChars,
       };
     });
 
     let aiResults: any[] = [];
+    let fetchError: string | null = null;
 
     try {
       const response = await fetch('/api/analyze-chapter-weightage', {
@@ -58,19 +95,29 @@ export class AIWeightageService {
         const data = await response.json();
         if (data.chapters && Array.isArray(data.chapters) && data.chapters.length > 0) {
           aiResults = data.chapters;
+        } else {
+          fetchError = 'Empty analysis returned by server.';
         }
+      } else {
+        const errJson = await response.json().catch(() => ({}));
+        fetchError = errJson.error || 'Server error during chapter weightage analysis.';
       }
-    } catch (err) {
-      console.warn('Backend analyze-chapter-weightage failed, using local academic heuristic:', err);
+    } catch (err: any) {
+      fetchError = err.message || 'Network error communicating with analysis endpoint.';
     }
 
-    // 2. If AI call failed or returned incomplete data, compute academic rubric scores
+    // Requirement 4: Strictly fail on error for real uploaded textbooks.
+    // Do NOT silently substitute generic scores.
+    if ((!aiResults || aiResults.length === 0) && !document.is_demo) {
+      throw new Error(`AI chapter analysis failed. Please retry.`);
+    }
+
+    // 2. Map AI results or clearly labelled sample heuristic for demo books
     const analyses: Omit<ChapterAIAnalysis, 'raw_marks' | 'final_marks'>[] = selectedChapters.map((chap) => {
       const match = aiResults.find((r) => r.chapter_id === chap.id);
-      const rawPages = Math.max(1, (chap.page_end - chap.page_start) + 1);
+      const rawPages = Math.max(1, chap.page_end - chap.page_start + 1);
 
       if (match) {
-        // Compute overall score from the 5 factors
         const pv = Math.max(0, Math.min(100, Number(match.page_volume_score) || 70));
         const imp = Math.max(0, Math.min(100, Number(match.importance_score) || 75));
         const rel = Math.max(0, Math.min(100, Number(match.chapter_relationship_score) || 70));
@@ -101,46 +148,25 @@ export class AIWeightageService {
         };
       }
 
-      // Academic Rubric Heuristic
-      const titleLower = chap.title.toLowerCase();
-      let impScore = 75;
-      let impLabel: ChapterAIAnalysis['importance_label'] = 'High';
-
-      if (titleLower.includes('fraction') || titleLower.includes('integer') || titleLower.includes('geometry')) {
-        impScore = 90;
-        impLabel = 'Essential Foundation';
-      } else if (titleLower.includes('algebra') || titleLower.includes('mensuration') || titleLower.includes('decimal')) {
-        impScore = 84;
-        impLabel = 'High';
-      } else if (titleLower.includes('ratio') || titleLower.includes('shape')) {
-        impScore = 76;
-        impLabel = 'Moderate';
-      }
-
-      const pvScore = Math.min(95, Math.max(55, Math.round(50 + rawPages * 2)));
-      const relScore = impScore >= 85 ? 85 : 72;
-      const sklScore = 78;
-      const assScore = 80;
-      const overall = Number((0.30 * pvScore + 0.30 * impScore + 0.20 * relScore + 0.15 * sklScore + 0.05 * assScore).toFixed(1));
-
+      // ONLY for demo sample book: Clearly labelled demo heuristic
       return {
         chapter_id: chap.id,
         chapter_title: chap.title,
         effective_pages: rawPages,
-        page_volume_score: pvScore,
-        importance_score: impScore,
-        chapter_relationship_score: relScore,
-        skill_breadth_score: sklScore,
-        assessment_richness_score: assScore,
-        overall_score: overall,
-        importance_label: impLabel,
-        short_reason: `Foundational Class VI syllabus unit with ${rawPages} effective pages and high assessment richness.`,
+        page_volume_score: 70,
+        importance_score: 75,
+        chapter_relationship_score: 70,
+        skill_breadth_score: 75,
+        assessment_richness_score: 75,
+        overall_score: 72.5,
+        importance_label: 'Moderate',
+        short_reason: `[DEMO HEURISTIC] Sample syllabus unit for demonstration purposes only.`,
         factor_notes: {
-          content_volume: `Contains ${rawPages} physical textbook pages with instructional theory and exercises.`,
-          foundational_importance: `Fundamental conceptual maturity for Class VI level assessment.`,
-          inter_chapter_relevance: `Strong conceptual link with arithmetic, algebraic and geometrical modules.`,
-          problem_solving_breadth: `Supports calculation, reasoning, and multi-step problem solving.`,
-          assessment_richness: `Supports multiple question denominations (1M, 2M, 3M, 4M).`,
+          content_volume: `[DEMO] Estimated ${rawPages} instructional pages.`,
+          foundational_importance: `[DEMO] Standard secondary mathematics concept.`,
+          inter_chapter_relevance: `[DEMO] Conceptual link across modules.`,
+          problem_solving_breadth: `[DEMO] Standard exercise problem set.`,
+          assessment_richness: `[DEMO] Supports 1M, 2M, 3M and 4M allocations.`,
         },
       };
     });

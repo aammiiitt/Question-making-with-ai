@@ -57,7 +57,7 @@ export interface Chapter {
   page_start: number;
   page_end: number;
   topics_count?: number;
-  status: 'detected' | 'verified' | 'custom';
+  status: 'detected' | 'verified' | 'custom' | 'needs_review';
 }
 
 export interface Topic {
@@ -96,6 +96,8 @@ export interface QuestionSource {
   source_confidence: number;
   retrieved_chunk_ids?: string[];
   is_real_pdf_grounded?: boolean;
+  ai_source_excerpt?: string;
+  is_excerpt_matched?: boolean;
 }
 
 export interface AnswerItem {
@@ -174,6 +176,7 @@ export interface PipelineStep {
 }
 
 export type WeightageMode = 'ai_recommended' | 'exact_marks' | 'percentage' | 'equal';
+export type AIWeightageAnalysisStatus = 'not_started' | 'analyzing' | 'success' | 'failed';
 
 export interface ChapterAIAnalysis {
   chapter_id: string;

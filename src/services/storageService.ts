@@ -20,6 +20,7 @@ const ALL_INITIAL_CHUNKS = [...DEMO_KNOWLEDGE_CHUNKS];
 const STORAGE_KEYS = {
   USER: 'ai_qpm_user',
   DOCUMENTS: 'ai_qpm_documents',
+  DOCUMENT_PAGES: 'ai_qpm_document_pages',
   CHAPTERS: 'ai_qpm_chapters',
   TOPICS: 'ai_qpm_topics',
   CHUNKS: 'ai_qpm_chunks',
@@ -91,13 +92,51 @@ class StorageService {
   public deleteDocument(id: string): void {
     const docs = this.getDocuments().filter((d) => d.id !== id);
     localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(docs));
-    // also remove chapters, topics, chunks
+    // also remove chapters, topics, chunks, and pages
     const chaps = this.getChapters().filter((c) => c.document_id !== id);
     localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(chaps));
     const tops = this.getTopics().filter((t) => t.document_id !== id);
     localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(tops));
     const chunks = this.getChunks().filter((c) => c.document_id !== id);
     localStorage.setItem(STORAGE_KEYS.CHUNKS, JSON.stringify(chunks));
+    if (this.isBrowser()) {
+      try {
+        const pagesStore = JSON.parse(localStorage.getItem(STORAGE_KEYS.DOCUMENT_PAGES) || '{}');
+        delete pagesStore[id];
+        localStorage.setItem(STORAGE_KEYS.DOCUMENT_PAGES, JSON.stringify(pagesStore));
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  public saveDocumentPages(docId: string, pages: { pageNumber: number; text: string }[]): void {
+    if (!this.isBrowser()) return;
+    try {
+      const store = JSON.parse(localStorage.getItem(STORAGE_KEYS.DOCUMENT_PAGES) || '{}');
+      store[docId] = pages;
+      localStorage.setItem(STORAGE_KEYS.DOCUMENT_PAGES, JSON.stringify(store));
+    } catch (e) {
+      console.warn('Could not save full document pages to localStorage:', e);
+    }
+  }
+
+  public getDocumentPages(docId: string): { pageNumber: number; text: string }[] {
+    if (!this.isBrowser()) return [];
+    try {
+      const store = JSON.parse(localStorage.getItem(STORAGE_KEYS.DOCUMENT_PAGES) || '{}');
+      return store[docId] || [];
+    } catch {
+      return [];
+    }
+  }
+
+  public replaceChunksForDocument(docId: string, newChunks: KnowledgeChunk[]): void {
+    const allChunks = this.getChunks().filter((c) => c.document_id !== docId);
+    allChunks.push(...newChunks);
+    if (this.isBrowser()) {
+      localStorage.setItem(STORAGE_KEYS.CHUNKS, JSON.stringify(allChunks));
+    }
   }
 
   public getChapters(documentId?: string): Chapter[] {

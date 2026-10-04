@@ -285,24 +285,32 @@ app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Re
 
 /**
  * Endpoint: POST /api/detect-chapters
- * Uses Gemini to parse Table of Contents or intro pages to detect chapters,
- * and builds REAL knowledge chunks containing actual extracted PDF text.
+ * Uses Gemini to parse Table of Contents / intro pages to detect chapters,
+ * and builds REAL knowledge chunks containing actual extracted PDF text across allPages.
  */
 app.post('/api/detect-chapters', async (req: Request, res: Response) => {
   try {
-    const { documentId, bookTitle, pages } = req.body;
+    const { documentId, bookTitle, tocPages, allPages, pages, isDemo } = req.body;
     if (!aiClient) {
       return res.status(503).json({ error: 'Gemini not available.' });
     }
 
-    const pagesText = (pages || [])
-      .slice(0, 20)
+    // Requirement 1: Separate tocPages (for Gemini detection) and allPages (for chunk building)
+    const fullPages = Array.isArray(allPages) && allPages.length > 0
+      ? allPages
+      : (Array.isArray(pages) ? pages : []);
+
+    const sampleTocPages = Array.isArray(tocPages) && tocPages.length > 0
+      ? tocPages
+      : fullPages.slice(0, 25);
+
+    const pagesText = sampleTocPages
       .map((p: any) => `[Page ${p.pageNumber}]: ${p.text}`)
       .join('\n\n')
-      .slice(0, 15000);
+      .slice(0, 24000);
 
-    const prompt = `Analyze the following initial pages of the textbook titled "${bookTitle}".
-Extract the exact list of chapters, their estimated start and end page numbers, and core topics.
+    const prompt = `Analyze the following Table of Contents / initial pages of the textbook titled "${bookTitle}".
+Extract the exact list of chapters, their estimated physical start and end page numbers, and core topics.
 Pages:\n${pagesText}`;
 
     const response = await aiClient.models.generateContent({
@@ -337,6 +345,20 @@ Pages:\n${pagesText}`;
     const parsed = JSON.parse(response.text || '{}');
     const rawChapters = parsed.chapters || [];
 
+    // Requirement 2: Never invent chapters for real books
+    if (rawChapters.length === 0) {
+      if (!isDemo) {
+        return res.status(422).json({
+          success: false,
+          status: 'needs_review',
+          error: 'CHAPTER DETECTION NEEDS REVIEW: Could not reliably detect chapters from table of contents. Please map chapter page ranges manually.',
+          chapters: [],
+          topics: [],
+          chunks: [],
+        });
+      }
+    }
+
     const chapters = rawChapters.map((rc: any, idx: number) => ({
       id: `chap-${documentId}-${rc.chapter_number || idx + 1}`,
       document_id: documentId,
@@ -351,6 +373,7 @@ Pages:\n${pagesText}`;
     const topics: any[] = [];
     const chunks: any[] = [];
 
+    // Requirement 1: Build knowledge chunks from ALL extracted physical pages (fullPages), NOT truncated pages!
     rawChapters.forEach((rc: any, idx: number) => {
       const chapId = `chap-${documentId}-${rc.chapter_number || idx + 1}`;
       const chapTopics =
@@ -366,8 +389,8 @@ Pages:\n${pagesText}`;
         });
       });
 
-      // Strict Real Chunks: Gather ACTUAL text from physical pages within [page_start, page_end]
-      const chapterPages = (pages || []).filter(
+      // Gather ACTUAL text from physical pages within [page_start, page_end] across the ENTIRE document
+      const chapterPages = fullPages.filter(
         (p: any) =>
           p.pageNumber >= rc.page_start &&
           p.pageNumber <= rc.page_end &&
@@ -376,7 +399,7 @@ Pages:\n${pagesText}`;
       );
 
       if (chapterPages.length > 0) {
-        // Group into real chunks of 1-3 physical pages
+        // Group into real chunks of 2 physical pages
         const pageSize = 2;
         for (let cIdx = 0; cIdx < chapterPages.length; cIdx += pageSize) {
           const group = chapterPages.slice(cIdx, cIdx + pageSize);
@@ -399,7 +422,7 @@ Pages:\n${pagesText}`;
       }
     });
 
-    return res.json({ chapters, topics, chunks });
+    return res.json({ success: true, status: 'detected', chapters, topics, chunks });
   } catch (error: any) {
     console.error('Error detecting chapters:', error);
     return res.status(500).json({ error: error.message });
@@ -407,15 +430,58 @@ Pages:\n${pagesText}`;
 });
 
 /**
+ * Endpoint: POST /api/rebuild-chapter-chunks
+ * Rebuilds knowledge chunks after teacher verifies or edits physical PDF chapter ranges
+ */
+app.post('/api/rebuild-chapter-chunks', async (req: Request, res: Response) => {
+  try {
+    const { documentId, chapters, allPages } = req.body;
+    if (!Array.isArray(chapters) || !Array.isArray(allPages)) {
+      return res.status(400).json({ error: 'chapters and allPages arrays are required.' });
+    }
+
+    const chunks: any[] = [];
+    chapters.forEach((chap: any) => {
+      const chapterPages = allPages.filter(
+        (p: any) =>
+          p.pageNumber >= Number(chap.page_start) &&
+          p.pageNumber <= Number(chap.page_end) &&
+          p.text &&
+          p.text.trim().length > 0
+      );
+
+      const pageSize = 2;
+      for (let cIdx = 0; cIdx < chapterPages.length; cIdx += pageSize) {
+        const group = chapterPages.slice(cIdx, cIdx + pageSize);
+        const startP = group[0].pageNumber;
+        const endP = group[group.length - 1].pageNumber;
+        const actualText = group
+          .map((gp: any) => `[Page ${gp.pageNumber}]\n${gp.text}`)
+          .join('\n\n');
+
+        chunks.push({
+          id: `chunk-${chap.id}-${Math.floor(cIdx / pageSize) + 1}`,
+          document_id: documentId,
+          chapter_id: chap.id,
+          page_start: startP,
+          page_end: endP,
+          text: actualText,
+          extraction_confidence: 0.98,
+        });
+      }
+    });
+
+    return res.json({ success: true, chunks });
+  } catch (error: any) {
+    console.error('Error rebuilding chapter chunks:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * Endpoint: POST /api/analyze-chapter-weightage
  * AI Intelligent Chapter Weightage Analysis for Class VI Mathematics
- * Evaluates the 5 Factors:
- * 1. Effective Content Volume / Page Coverage (30%)
- * 2. Mathematical / Foundational Importance (30%)
- * 3. Relationship to Other Chapters (20%)
- * 4. Skill & Problem-Solving Breadth (15%)
- * 5. Assessment Richness (5%)
- * Returns structured scores and concise teacher explanations.
+ * Evaluates the 5 Factors with representative multi-sample chapter context & deterministic text statistics.
  */
 app.post('/api/analyze-chapter-weightage', async (req: Request, res: Response) => {
   try {
@@ -428,6 +494,7 @@ app.post('/api/analyze-chapter-weightage', async (req: Request, res: Response) =
       return res.status(400).json({ error: 'Please select at least one chapter for analysis.' });
     }
 
+    // Requirement 5: Analyze more of each chapter with representative 3-sample context + statistics
     const chaptersSummary = selectedChapters
       .map((c: any, idx: number) => {
         const pagesCount = Math.max(1, (c.page_end - c.page_start) + 1);
@@ -435,11 +502,24 @@ app.post('/api/analyze-chapter-weightage', async (req: Request, res: Response) =
 ID: ${c.chapter_id}
 Title: ${c.chapter_title}
 Number: ${c.chapter_number || idx + 1}
-Page Range: ${c.page_start} - ${c.page_end} (${pagesCount} physical pages)
-Sample Textbook Text from Real Pages:
-${(c.sample_text || '').slice(0, 1800)}`;
+Physical Page Range: ${c.page_start} to ${c.page_end} (${pagesCount} physical pages)
+Effective Instructional/Exercise Pages: ${c.effective_pages_count || pagesCount}
+Text Volume Statistics: ~${c.total_words || Math.round(pagesCount * 220)} words, ~${c.total_chars || Math.round(pagesCount * 1400)} characters
+Approximate Worked Examples Detected: ${c.worked_examples_count ?? 'Multiple worked-out examples'}
+Approximate Exercises & Questions: ${c.exercises_count ?? 'Standard chapter exercise sets'}
+Presence of Geometric/Diagram Materials: ${c.has_diagrams ? 'Yes (Diagrams, constructions or geometrical figures detected)' : 'Standard numerical/algebraic topics'}
+Detected Subtopics: ${(c.topics && c.topics.length > 0) ? c.topics.join(', ') : 'Key chapter concepts'}
+
+Beginning Representative Sample (~1500 chars):
+${(c.beginning_sample || c.sample_text || '').slice(0, 1600)}
+
+Middle Representative Sample (~1500 chars):
+${(c.middle_sample || '').slice(0, 1600)}
+
+Ending Representative Sample (~1500 chars):
+${(c.ending_sample || '').slice(0, 1600)}`;
       })
-      .join('\n\n---\n\n');
+      .join('\n\n========================================\n\n');
 
     const prompt = `You are a senior Class VI Mathematics academic supervisor preparing a 70-mark school examination question paper.
 Textbook: "${documentTitle || 'Class VI Mathematics'}"

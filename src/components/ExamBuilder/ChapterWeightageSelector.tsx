@@ -27,6 +27,7 @@ import {
   DocumentItem,
   ChapterAIAnalysis,
   Chapter,
+  AIWeightageAnalysisStatus,
 } from '../../types';
 import { SolverResult } from '../../services/constraintSolver';
 import { aiWeightageService } from '../../services/aiWeightageService';
@@ -39,6 +40,7 @@ interface ChapterWeightageSelectorProps {
   onModeChange: (mode: WeightageMode) => void;
   onChaptersChange: (updated: ChapterWeightage[]) => void;
   onSolveAndProceed: () => void;
+  onOpenVerificationModal?: () => void;
   solverDeficiency?: SolverResult | null;
   onApplySuggestion?: (adjustment: {
     chapters?: { chapter_id: string; marks: number }[];
@@ -53,6 +55,7 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
   onModeChange,
   onChaptersChange,
   onSolveAndProceed,
+  onOpenVerificationModal,
   solverDeficiency,
   onApplySuggestion,
 }) => {
@@ -63,7 +66,8 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
   const remainingMarks = targetTotal - currentTotalMarks;
 
   // AI Weightage State
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState<AIWeightageAnalysisStatus>('not_started');
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [aiAnalyses, setAiAnalyses] = useState<ChapterAIAnalysis[]>([]);
   const [expandedChapterId, setExpandedChapterId] = useState<string | null>(null);
   const [isManualEditActive, setIsManualEditActive] = useState(false);
@@ -74,7 +78,8 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
     const selected = list.filter((c) => c.included);
     if (selected.length === 0) return;
 
-    setIsAnalyzing(true);
+    setAnalysisStatus('analyzing');
+    setAnalysisError(null);
     try {
       const docChapters = storageService.getChapters(document.id);
       const matched = selected.map((sc) => {
@@ -94,6 +99,7 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
 
       const analyses = await aiWeightageService.analyzeChapters(document, matched);
       setAiAnalyses(analyses);
+      setAnalysisStatus('success');
 
       // Apply recommended marks to chapters
       const updated = list.map((c) => {
@@ -111,10 +117,10 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
       });
 
       onChaptersChange(updated);
-    } catch (err) {
+    } catch (err: any) {
       console.error('AI analysis error:', err);
-    } finally {
-      setIsAnalyzing(false);
+      setAnalysisStatus('failed');
+      setAnalysisError(err.message || 'AI chapter analysis failed. Please retry.');
     }
   };
 
@@ -336,12 +342,12 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <button
               type="button"
-              disabled={isAnalyzing}
+              disabled={analysisStatus === 'analyzing'}
               onClick={() => runAiAnalysis()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer disabled:opacity-60"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isAnalyzing ? 'animate-spin' : ''}`} />
-              <span>{isAnalyzing ? 'Analyzing...' : 'Reanalyze'}</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${analysisStatus === 'analyzing' ? 'animate-spin' : ''}`} />
+              <span>{analysisStatus === 'analyzing' ? 'Analyzing...' : 'Reanalyze'}</span>
             </button>
           </div>
         ) : (
@@ -357,6 +363,39 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
           )
         )}
       </div>
+
+      {/* Requirement 4: Explicit AI Analysis Failure State */}
+      {mode === 'ai_recommended' && analysisStatus === 'failed' && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            <div>
+              <span className="font-bold block text-sm">AI Chapter Weightage Analysis Failed</span>
+              <span className="text-rose-800 text-[11px] mt-0.5 block">
+                {analysisError || 'AI chapter analysis failed. Please retry.'}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => runAiAnalysis()}
+            className="flex items-center gap-1.5 px-4 py-2 bg-rose-900 text-white rounded-lg text-xs font-bold hover:bg-rose-800 transition-colors shrink-0 shadow-xs cursor-pointer self-start sm:self-auto"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Retry AI Chapter Analysis</span>
+          </button>
+        </div>
+      )}
+
+      {/* AI Analyzing In-Progress Status */}
+      {mode === 'ai_recommended' && analysisStatus === 'analyzing' && (
+        <div className="p-3.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-950 flex items-center gap-2.5">
+          <RefreshCw className="w-4 h-4 text-indigo-600 animate-spin shrink-0" />
+          <span>
+            Analyzing 5 academic factors (Content Volume 30%, Importance 30%, Relationships 20%, Problem Breadth 15%, Richness 5%) across representative chapter pages with Gemini 3.8 Flash...
+          </span>
+        </div>
+      )}
 
       {/* Mode Specific Toolbar for AI RECOMMENDED */}
       {mode === 'ai_recommended' && (
@@ -397,6 +436,23 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
           </div>
         </div>
       )}
+
+      {/* Requirement 3: Physical PDF Page Verification Link / Toolbar */}
+      <div className="flex items-center justify-between pb-1">
+        <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+          Chapters & Allocation Quotas ({includedChapters.length} of {chapters.length} Included)
+        </span>
+        {onOpenVerificationModal && (
+          <button
+            type="button"
+            onClick={onOpenVerificationModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer shadow-2xs"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-slate-600" />
+            <span>Verify Physical PDF Page Ranges</span>
+          </button>
+        )}
+      </div>
 
       {/* Chapters Table */}
       <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs text-xs">
@@ -762,29 +818,42 @@ export const ChapterWeightageSelector: React.FC<ChapterWeightageSelectorProps> =
       )}
 
       {/* Action Footer */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-        <div className="text-xs text-slate-500">
-          {includedChapters.length} chapters selected · Every question slot strictly constrained
-        </div>
+      {(() => {
+        const isAiReady =
+          mode !== 'ai_recommended' ||
+          (analysisStatus === 'success' && aiAnalyses.length >= includedChapters.length);
+        const canProceed = isExact70 && isAiReady && analysisStatus !== 'analyzing';
 
-        <button
-          type="button"
-          disabled={!isExact70}
-          onClick={onSolveAndProceed}
-          className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer ${
-            isExact70
-              ? 'bg-slate-900 text-white hover:bg-slate-800 active:scale-98'
-              : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-          }`}
-        >
-          <span>
-            {mode === 'ai_recommended'
-              ? 'Accept AI Weightage & Allocate Question Slots'
-              : 'Solve Blueprint & Allocate Question Slots'}
-          </span>
-          <ArrowRight className="w-4 h-4 text-amber-400" />
-        </button>
-      </div>
+        return (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+            <div className="text-xs text-slate-500">
+              {includedChapters.length} chapters selected · Every question slot strictly constrained
+            </div>
+
+            <button
+              type="button"
+              disabled={!canProceed}
+              onClick={onSolveAndProceed}
+              className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                canProceed
+                  ? 'bg-slate-900 text-white hover:bg-slate-800 active:scale-98'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              <span>
+                {analysisStatus === 'analyzing'
+                  ? 'Evaluating Chapter Weightage with Gemini...'
+                  : analysisStatus === 'failed' && mode === 'ai_recommended'
+                  ? 'AI Analysis Required (Retry Above)'
+                  : mode === 'ai_recommended'
+                  ? 'Accept AI Weightage & Allocate Question Slots'
+                  : 'Solve Blueprint & Allocate Question Slots'}
+              </span>
+              <ArrowRight className="w-4 h-4 text-amber-400" />
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 };

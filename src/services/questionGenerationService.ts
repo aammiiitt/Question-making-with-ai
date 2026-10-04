@@ -141,6 +141,25 @@ export class QuestionGenerationService {
       marking_scheme: sanitized.marking_scheme,
     };
 
+    // Requirement 7: source_text must ALWAYS contain actual retrieved textbook passage text
+    const matchedPassage =
+      retrievedPassages.find((p) =>
+        sanitized.source_pages.some((sp) => sp >= p.pageStart && sp <= p.pageEnd)
+      ) || retrievedPassages[0];
+
+    const actualRetrievedText = matchedPassage
+      ? matchedPassage.text
+      : retrievedPassages.map((p) => p.text).join('\n\n');
+
+    const aiExcerpt = sanitized.source_excerpt?.trim();
+    let isExcerptMatched = false;
+    if (aiExcerpt && actualRetrievedText) {
+      const normExcerpt = aiExcerpt.toLowerCase().replace(/\s+/g, ' ');
+      const normSource = actualRetrievedText.toLowerCase().replace(/\s+/g, ' ');
+      const searchSnippet = normExcerpt.slice(0, Math.min(35, normExcerpt.length));
+      isExcerptMatched = normSource.includes(searchSnippet);
+    }
+
     const sourceObj: QuestionSource = {
       id: sourceId,
       question_id: questionId,
@@ -149,7 +168,9 @@ export class QuestionGenerationService {
       chapter_title: chapter.title,
       page_start: sanitized.source_pages[0] || minPage,
       page_end: sanitized.source_pages[sanitized.source_pages.length - 1] || maxPage,
-      source_text: sanitized.source_excerpt || retrievedPassages[0].text,
+      source_text: actualRetrievedText,
+      ai_source_excerpt: aiExcerpt,
+      is_excerpt_matched: isExcerptMatched,
       source_confidence: validation.isSourceVerified ? sanitized.source_confidence : 0.65,
       retrieved_chunk_ids: retrievedPassages.map((p) => p.chunkId),
       is_real_pdf_grounded: !document.is_demo,

@@ -95,6 +95,8 @@ export class DocumentProcessingService {
 
     // Step 3: Pages identified
     updateStep(2, 'in_progress');
+    // Save physical pages to storage for subsequent verification and re-indexing
+    storageService.saveDocumentPages(docId, extractedPages);
     await new Promise((r) => setTimeout(r, 500));
     updateStep(2, 'completed');
 
@@ -104,15 +106,22 @@ export class DocumentProcessingService {
     const detectionResult = await chapterDetectionService.detectChapters(
       docId,
       extractedPages,
-      bookTitle
+      bookTitle,
+      false // Real uploaded textbook
     );
     await new Promise((r) => setTimeout(r, 750));
-    updateStep(3, 'completed');
+
+    const needsReview = detectionResult.chapters.length === 0;
+    if (needsReview) {
+      updateStep(3, 'failed');
+    } else {
+      updateStep(3, 'completed');
+    }
 
     // Step 5: Topics detected
     updateStep(4, 'in_progress');
-    await new Promise((r) => setTimeout(r, 600));
-    updateStep(4, 'completed');
+    await new Promise((r) => setTimeout(r, 500));
+    updateStep(4, needsReview ? 'failed' : 'completed');
 
     // Step 6: Knowledge indexed
     updateStep(5, 'in_progress');
@@ -120,10 +129,10 @@ export class DocumentProcessingService {
     detectionResult.chapters.forEach((c) => storageService.saveChapter(c));
     detectionResult.topics.forEach((t) => storageService.saveTopic(t));
     detectionResult.chunks.forEach((chk) => storageService.saveChunk(chk));
-    await new Promise((r) => setTimeout(r, 600));
-    updateStep(5, 'completed');
+    await new Promise((r) => setTimeout(r, 500));
+    updateStep(5, needsReview ? 'failed' : 'completed');
 
-    // Step 7: Ready
+    // Step 7: Final Document status
     updateStep(6, 'in_progress');
     const newDoc: DocumentItem = {
       id: docId,
@@ -133,7 +142,7 @@ export class DocumentProcessingService {
       file_size: file.size,
       page_count: pageCount,
       language: 'English',
-      status: 'ready',
+      status: needsReview ? 'needs_review' : 'ready',
       processing_step: 7,
       detected_chapters_count: detectionResult.chapters.length,
       created_at: new Date().toISOString(),

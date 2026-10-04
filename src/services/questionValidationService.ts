@@ -93,12 +93,8 @@ export class QuestionValidationService {
       }
     }
 
-    // Phase 5: Strengthen Source Verification
-    // A question can be marked SOURCE GROUNDED only when:
-    // 1. its source passage is actual extracted PDF text
-    // 2. the exact retrieved passage was sent to Gemini
-    // 3. cited pages correspond to retrieved passages
-    // 4. question source data contains those passages
+    // Requirement 6: Make Source Verification Strict
+    // A source page is verified ONLY if it belongs to an actual retrieved passage.
     let source_pages: number[] = [];
     let isSourceVerified = false;
 
@@ -112,19 +108,22 @@ export class QuestionValidationService {
 
     if (Array.isArray(raw.source_pages) && raw.source_pages.length > 0) {
       source_pages = raw.source_pages.map((p: any) => Number(p)).filter((p: number) => !isNaN(p));
-      // Verify cited pages actually exist in the retrieved passages
+      // Requirement 6: Strict check - every cited page must exist in validPassagePages
       const allPagesInRetrieved =
         source_pages.length > 0 &&
-        source_pages.every((pg) => validPassagePages.has(pg) || (pg >= allowedPages.min && pg <= allowedPages.max));
+        source_pages.every((pg) => validPassagePages.has(pg));
 
       const hasRealPassageText =
         retrievedPassages.length > 0 &&
         retrievedPassages.some((p) => p.text && p.text.trim().length > 30);
 
       isSourceVerified = allPagesInRetrieved && hasRealPassageText;
-    } else if (retrievedPassages.length > 0) {
-      source_pages = [retrievedPassages[0].pageStart, retrievedPassages[0].pageEnd];
-      isSourceVerified = true;
+    } else {
+      // If Gemini does not return source_pages: do NOT automatically mark it verified.
+      // Use fallback pages for display only, but flag as unverified
+      source_pages = retrievedPassages.length > 0 ? [retrievedPassages[0].pageStart] : [];
+      isSourceVerified = false;
+      errors.push('AI failed to cite exact source page numbers from the retrieved textbook passage.');
     }
 
     const sourceGroundingStatus: 'verified' | 'needs_review' =

@@ -9,21 +9,27 @@ export interface ChapterDetectionResult {
 export class ChapterDetectionService {
   /**
    * Detects chapters and topics from extracted text or table of contents.
+   * Requirement 1: Sends tocPages for Gemini detection and allPages for building chunks.
+   * Requirement 2: Never invents chapters for real uploaded textbooks.
    */
   public async detectChapters(
     documentId: string,
     extractedPages: { pageNumber: number; text: string }[],
-    bookTitle: string
+    bookTitle: string,
+    isDemo: boolean = false
   ): Promise<ChapterDetectionResult> {
-    // If server has Gemini endpoint, we can invoke it
+    // 1. Send all extracted pages and TOC subset to /api/detect-chapters
     try {
+      const tocPages = extractedPages.slice(0, 25);
       const response = await fetch('/api/detect-chapters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           documentId,
           bookTitle,
-          pages: extractedPages.slice(0, 15), // Table of contents usually in first 15 pages
+          tocPages,
+          allPages: extractedPages,
+          isDemo,
         }),
       });
 
@@ -32,18 +38,23 @@ export class ChapterDetectionService {
         if (data.chapters && data.chapters.length > 0) {
           return data;
         }
+      } else {
+        const errJson = await response.json().catch(() => ({}));
+        if (errJson.status === 'needs_review') {
+          console.warn('Backend reported CHAPTER DETECTION NEEDS REVIEW');
+        }
       }
     } catch (e) {
-      console.warn('Chapter detection API unavailable, using heuristic parser:', e);
+      console.warn('Chapter detection API unreachable, checking heuristic fallback:', e);
     }
 
-    // Heuristic chapter detection
+    // Heuristic chapter detection based strictly on regex matches in extracted text
     const totalPages = extractedPages.length || 50;
     const detectedChapters: Chapter[] = [];
     const detectedTopics: Topic[] = [];
     const detectedChunks: KnowledgeChunk[] = [];
 
-    // Analyze text for common Chapter patterns: "Chapter 1", "অধ্যায় ১", "Unit 1", etc.
+    // Analyze text for authentic Chapter headings: "Chapter 1", "অধ্যায় ১", "Unit 1", etc.
     const chapterRegex = /(?:chapter|unit|অধ্যায়)\s*(\d+|[IVXLCDM]+)[:.\-\s]+([^\n\r.]+)/i;
 
     let foundIndices: { page: number; title: string; num: number }[] = [];
@@ -51,23 +62,38 @@ export class ChapterDetectionService {
     extractedPages.forEach((p) => {
       const match = p.text.match(chapterRegex);
       if (match && match[2]) {
-        foundIndices.push({
-          page: p.pageNumber,
-          title: match[2].trim(),
-          num: foundIndices.length + 1,
-        });
+        // Prevent duplicate detections of same chapter on consecutive pages
+        const cleanTitle = match[2].trim();
+        if (!foundIndices.some((f) => f.title.toLowerCase() === cleanTitle.toLowerCase())) {
+          foundIndices.push({
+            page: p.pageNumber,
+            title: cleanTitle,
+            num: foundIndices.length + 1,
+          });
+        }
       }
     });
 
+    // Requirement 2: NEVER invent chapters for real books
     if (foundIndices.length === 0) {
-      // Create sensible estimated partitions
+      if (!isDemo) {
+        // Return clear CHAPTER DETECTION NEEDS REVIEW status with empty chapters
+        // Teacher will manually enter or verify chapters
+        return {
+          chapters: [],
+          topics: [],
+          chunks: [],
+        };
+      }
+
+      // ONLY for isDemo=true: allow demo fallback
       const segmentSize = Math.max(10, Math.floor(totalPages / 5));
       const sampleNames = [
-        'Introduction and Fundamental Principles',
-        'Physical Quantities and Laws',
-        'Energy, Work and State Transformations',
-        'Dynamic Systems and Waves',
-        'Applications and Modern Developments',
+        'Demo Chapter 1: Introduction and Principles',
+        'Demo Chapter 2: Quantities and Units',
+        'Demo Chapter 3: Energy and State Transformations',
+        'Demo Chapter 4: Dynamic Systems',
+        'Demo Chapter 5: Applications and Problem Solving',
       ];
 
       for (let i = 0; i < 5; i++) {
@@ -98,11 +124,11 @@ export class ChapterDetectionService {
         status: 'detected',
       });
 
-      // Sample topics for each chapter
+      // Topics for each chapter
       const topicsList = [
-        `${current.title} - Core Definitions`,
-        `${current.title} - Standard Equations & Laws`,
-        `${current.title} - Experimental Observations`,
+        `${current.title} - Core Concepts`,
+        `${current.title} - Standard Worked Problems`,
+        `${current.title} - Exercises & Applications`,
       ];
 
       topicsList.forEach((topTitle, tIdx) => {
@@ -115,7 +141,7 @@ export class ChapterDetectionService {
         });
       });
 
-      // Phase 3: Build real knowledge chunks from actual extracted physical pages
+      // Build real knowledge chunks from actual extracted physical pages across fullPages
       const chapterPages = extractedPages.filter(
         (p) =>
           p.pageNumber >= current.page &&

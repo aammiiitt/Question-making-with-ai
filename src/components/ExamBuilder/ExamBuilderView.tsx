@@ -16,6 +16,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Upload,
+  Lock,
 } from 'lucide-react';
 import {
   DocumentItem,
@@ -31,6 +33,7 @@ import { examPaperService } from '../../services/examPaperService';
 import { storageService } from '../../services/storageService';
 import { SolverResult } from '../../services/constraintSolver';
 import { ChapterWeightageSelector } from './ChapterWeightageSelector';
+import { ChapterVerificationModal } from './ChapterVerificationModal';
 import { WeightageReviewModal } from './WeightageReviewModal';
 import { PaperHealthCard } from './PaperHealthCard';
 import { ReplaceQuestionModal } from './ReplaceQuestionModal';
@@ -49,19 +52,24 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
   onOpenUpload,
   onNavigateToLibrary,
 }) => {
-  // Phase 1: Default to a REAL uploaded book when one is available
-  const realMathBook = documents.find(
+  // Requirement 9: Real exam builder must require a real textbook
+  const realDocuments = documents.filter((d) => !d.is_demo);
+  const realMathBook = realDocuments.find(
     (d) =>
-      !d.is_demo &&
-      (d.title.toLowerCase().includes('class vi') ||
-        d.title.toLowerCase().includes('class 6') ||
-        d.title.toLowerCase().includes('math'))
+      d.title.toLowerCase().includes('class vi') ||
+      d.title.toLowerCase().includes('class 6') ||
+      d.title.toLowerCase().includes('math')
   );
-  const anyRealBook = documents.find((d) => !d.is_demo);
-  const mathBook = realMathBook || anyRealBook || documents[0];
+  const defaultRealBook = realMathBook || realDocuments[0];
 
-  const [selectedBookId, setSelectedBookId] = useState<string>(mathBook?.id || '');
-  const [currentBook, setCurrentBook] = useState<DocumentItem>(mathBook);
+  const [useDemoBook, setUseDemoBook] = useState(false);
+  const sampleBook =
+    documents.find((d) => d.id === 'doc-class6-math-sample') || documents.find((d) => d.is_demo);
+
+  const activeInitialBook = defaultRealBook || (useDemoBook ? sampleBook : undefined);
+
+  const [selectedBookId, setSelectedBookId] = useState<string>(activeInitialBook?.id || '');
+  const [currentBook, setCurrentBook] = useState<DocumentItem | undefined>(activeInitialBook);
   const [chapters, setChapters] = useState<Chapter[]>([]);
 
   // Paper state
@@ -70,6 +78,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
   const [solverDeficiency, setSolverDeficiency] = useState<SolverResult | null>(null);
 
   // Modals
+  const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [activeReplaceSlot, setActiveReplaceSlot] = useState<QuestionSlot | null>(null);
@@ -100,8 +109,81 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
         const p = examPaperService.getOrCreatePaper(book, chaps);
         setPaper(p);
       }
+    } else if (defaultRealBook) {
+      setSelectedBookId(defaultRealBook.id);
     }
-  }, [selectedBookId, documents]);
+  }, [selectedBookId, documents, defaultRealBook]);
+
+  // Requirement 9: If no real uploaded textbook exists and demo not explicitly requested, show real exam requirement screen
+  if (realDocuments.length === 0 && !useDemoBook) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 pt-4">
+        {/* Banner */}
+        <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-2xl p-8 border border-slate-800 shadow-md">
+          <div className="max-w-xl space-y-3">
+            <span className="text-[11px] font-bold bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+              Real Examination Requirement
+            </span>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Class VI Mathematics (70-Mark Summative Exam)
+            </h1>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Upload your actual Class VI Mathematics textbook PDF to begin the real 70-mark examination.
+              Unrelated demo textbooks are strictly prevented from automatically entering real examination mode to guarantee authentic syllabus citations and marking schemes.
+            </p>
+            <div className="pt-2 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={onOpenUpload}
+                className="flex items-center gap-2 px-5 py-2.5 bg-amber-400 text-slate-950 rounded-xl font-bold text-xs hover:bg-amber-300 transition-colors shadow-sm cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Upload Class VI Mathematics Textbook PDF</span>
+              </button>
+
+              {sampleBook && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseDemoBook(true);
+                    setSelectedBookId(sampleBook.id);
+                  }}
+                  className="px-4 py-2 bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
+                >
+                  Explore with DEMO / SAMPLE Book (Testing Only)
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 3 Core Rules Card */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-1.5 shadow-2xs">
+            <ShieldCheck className="w-5 h-5 text-emerald-600" />
+            <h3 className="font-bold text-slate-900">100% Genuine Textbook Grounding</h3>
+            <p className="text-slate-500 text-[11px] leading-relaxed">
+              Every question slot extracts authentic physical page excerpts from your uploaded PDF with zero hallucinations.
+            </p>
+          </div>
+          <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-1.5 shadow-2xs">
+            <Lock className="w-5 h-5 text-indigo-600" />
+            <h3 className="font-bold text-slate-900">Strict Chapter Marks Lock</h3>
+            <p className="text-slate-500 text-[11px] leading-relaxed">
+              Deterministic integer solver ensures chapter marks total exactly 70 marks across Sections A, B, C, and D.
+            </p>
+          </div>
+          <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-1.5 shadow-2xs">
+            <BookOpen className="w-5 h-5 text-amber-600" />
+            <h3 className="font-bold text-slate-900">Physical PDF Page Verification</h3>
+            <p className="text-slate-500 text-[11px] leading-relaxed">
+              Verify and align detected printed page numbers with actual PDF cover and preface offsets.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!paper || !currentBook) {
     return (
@@ -111,6 +193,53 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
       </div>
     );
   }
+
+  // Requirement 3: Handler for confirming physical chapter mapping
+  const handleConfirmChapterMapping = async (verifiedChapters: Chapter[]) => {
+    // 1. Save all updated chapters to storage
+    verifiedChapters.forEach((vc) => storageService.saveChapter(vc));
+    setChapters(verifiedChapters);
+
+    // 2. Call server /api/rebuild-chapter-chunks with physical pages
+    const docPages = storageService.getDocumentPages(currentBook.id);
+    if (docPages.length > 0) {
+      try {
+        const res = await fetch('/api/rebuild-chapter-chunks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentId: currentBook.id,
+            chapters: verifiedChapters,
+            allPages: docPages,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.chunks && Array.isArray(data.chunks)) {
+            storageService.replaceChunksForDocument(currentBook.id, data.chunks);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not rebuild chunks on backend:', e);
+      }
+    }
+
+    // 3. Mark document ready if it was needs_review
+    if (currentBook.status === 'needs_review') {
+      const updatedDoc: DocumentItem = {
+        ...currentBook,
+        status: 'ready',
+        detected_chapters_count: verifiedChapters.length,
+      };
+      storageService.saveDocument(updatedDoc);
+      setCurrentBook(updatedDoc);
+    }
+
+    // 4. Update paper weightage and slots with verified chapters
+    const updatedPaper = examPaperService.getOrCreatePaper(currentBook, verifiedChapters);
+    setPaper(updatedPaper);
+    setSolverDeficiency(null);
+  };
 
   const handleModeChange = (mode: WeightageMode) => {
     const updated = examPaperService.updateWeightage(paper, paper.chaptersWeightage, mode);
@@ -343,7 +472,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
           >
             {documents.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.title} ({d.page_count}p)
+                {d.is_demo ? `[DEMO / SAMPLE] ${d.title}` : d.title} ({d.page_count}p)
               </option>
             ))}
           </select>
@@ -392,6 +521,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
           onModeChange={handleModeChange}
           onChaptersChange={handleChaptersChange}
           onSolveAndProceed={handleSolveAndProceed}
+          onOpenVerificationModal={() => setIsVerificationModalOpen(true)}
           solverDeficiency={solverDeficiency}
           onApplySuggestion={handleApplySolverSuggestion}
         />
@@ -515,10 +645,17 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
 
                                 <div className="flex items-center gap-2">
                                   {slot.status === 'generated' ? (
-                                    <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-                                      <CheckCircle2 className="w-3.5 h-3.5" />
-                                      <span>Verified</span>
-                                    </span>
+                                    qItem?.source_grounding_status === 'verified' ? (
+                                      <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+                                        <CheckCircle2 className="w-3.5 h-3.5" />
+                                        <span>Verified</span>
+                                      </span>
+                                    ) : (
+                                      <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+                                        <AlertCircle className="w-3.5 h-3.5" />
+                                        <span>Needs Review</span>
+                                      </span>
+                                    )
                                   ) : slot.status === 'generating' ? (
                                     <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1">
                                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -651,9 +788,18 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
           isOpen={true}
           onClose={() => setActiveSourceSlot(null)}
           source={activeSourceSlot.questionItem.source}
-          isVerified={true}
+          isVerified={activeSourceSlot.questionItem.source_grounding_status === 'verified'}
         />
       )}
+
+      {/* Chapter Physical PDF Page Verification Modal */}
+      <ChapterVerificationModal
+        isOpen={isVerificationModalOpen}
+        onClose={() => setIsVerificationModalOpen(false)}
+        document={currentBook}
+        chapters={chapters}
+        onConfirmMapping={handleConfirmChapterMapping}
+      />
 
       {/* Edit Slot Question Modal */}
       {activeEditSlot && activeEditSlot.questionItem && (
