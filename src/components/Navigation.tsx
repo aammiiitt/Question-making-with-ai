@@ -8,10 +8,18 @@ import {
   Plus,
   GraduationCap,
   Languages,
+  Calculator,
 } from 'lucide-react';
 import { User } from '../types';
 
-export type ActiveTab = 'dashboard' | 'library' | 'generate' | 'questions' | 'settings' | 'book_details';
+export type ActiveTab =
+  | 'dashboard'
+  | 'library'
+  | 'generate'
+  | 'questions'
+  | 'settings'
+  | 'book_details'
+  | 'exam_builder';
 
 interface NavigationProps {
   activeTab: ActiveTab;
@@ -28,9 +36,10 @@ export const Navigation: React.FC<NavigationProps> = ({
 }) => {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'library', label: 'My Library', icon: BookOpen },
-    { id: 'generate', label: 'Generate Question', icon: Sparkles },
+    { id: 'exam_builder', label: 'Class VI Exam (70M)', icon: Calculator, badge: 'Hard Rule' },
+    { id: 'generate', label: 'Generate Single Q', icon: Sparkles },
     { id: 'questions', label: 'My Questions', icon: FileQuestion },
+    { id: 'library', label: 'My Library', icon: BookOpen },
     { id: 'settings', label: 'Settings', icon: Settings },
   ] as const;
 
@@ -84,7 +93,12 @@ export const Navigation: React.FC<NavigationProps> = ({
                     isActive ? 'text-slate-900' : 'text-slate-500'
                   }`}
                 />
-                <span>{item.label}</span>
+                <span className="flex-1 truncate">{item.label}</span>
+                {item.id === 'exam_builder' && (
+                  <span className="text-[10px] font-bold bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded border border-amber-300">
+                    70M
+                  </span>
+                )}
               </button>
             );
           })}

@@ -6,6 +6,7 @@ import { BookDetailsView } from './components/BookDetails/BookDetailsView';
 import { GenerateView } from './components/Generate/GenerateView';
 import { MyQuestionsView } from './components/MyQuestions/MyQuestionsView';
 import { SettingsView } from './components/Settings/SettingsView';
+import { ExamBuilderView } from './components/ExamBuilder/ExamBuilderView';
 import { UploadModal } from './components/UploadModal';
 import { storageService } from './services/storageService';
 import {
@@ -155,6 +156,15 @@ export default function App() {
               onOpenQuestionReview={(q) => {
                 setActiveTab('questions');
               }}
+              onExamBuilderClick={() => setActiveTab('exam_builder')}
+            />
+          )}
+
+          {activeTab === 'exam_builder' && (
+            <ExamBuilderView
+              documents={documents}
+              onOpenUpload={() => setIsUploadOpen(true)}
+              onNavigateToLibrary={() => setActiveTab('library')}
             />
           )}
 

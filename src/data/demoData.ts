@@ -1,4 +1,4 @@
-import { DocumentItem, Chapter, Topic, KnowledgeChunk, QuestionItem, User } from '../types';
+import { DocumentItem, Chapter, Topic, KnowledgeChunk, QuestionItem, User, SectionBlueprint } from '../types';
 
 export const INITIAL_USER: User = {
   id: 'teacher-101',
@@ -555,3 +555,418 @@ Hence, the heat generated quadruples (becomes four times).`,
     },
   },
 ];
+
+// ========================================================
+// CLASS VI MATHEMATICS CURRICULUM DATA (70-MARK REAL EXAM)
+// ========================================================
+
+export const CLASS_VI_MATH_BOOK: DocumentItem = {
+  id: 'doc-class6-math',
+  user_id: 'teacher-101',
+  title: 'Class VI Mathematics (NCERT & State Board)',
+  file_name: 'Class_VI_Mathematics_NCERT_Syllabus.pdf',
+  file_size: 18400000,
+  page_count: 220,
+  language: 'Bilingual',
+  status: 'ready',
+  detected_chapters_count: 8,
+  created_at: '2026-09-28T09:00:00Z',
+};
+
+export const CLASS_VI_MATH_CHAPTERS: Chapter[] = [
+  {
+    id: 'c6-chap-1-integers',
+    document_id: 'doc-class6-math',
+    title: 'Integers',
+    chapter_number: 1,
+    page_start: 110,
+    page_end: 132,
+    topics_count: 4,
+    status: 'verified',
+  },
+  {
+    id: 'c6-chap-2-fractions',
+    document_id: 'doc-class6-math',
+    title: 'Fractions',
+    chapter_number: 2,
+    page_start: 133,
+    page_end: 160,
+    topics_count: 5,
+    status: 'verified',
+  },
+  {
+    id: 'c6-chap-3-decimals',
+    document_id: 'doc-class6-math',
+    title: 'Decimals',
+    chapter_number: 3,
+    page_start: 161,
+    page_end: 184,
+    topics_count: 4,
+    status: 'verified',
+  },
+  {
+    id: 'c6-chap-4-geometry',
+    document_id: 'doc-class6-math',
+    title: 'Basic Geometrical Ideas',
+    chapter_number: 4,
+    page_start: 68,
+    page_end: 92,
+    topics_count: 6,
+    status: 'verified',
+  },
+  {
+    id: 'c6-chap-5-elem-shapes',
+    document_id: 'doc-class6-math',
+    title: 'Understanding Elementary Shapes',
+    chapter_number: 5,
+    page_start: 93,
+    page_end: 109,
+    topics_count: 5,
+    status: 'verified',
+  },
+  {
+    id: 'c6-chap-6-mensuration',
+    document_id: 'doc-class6-math',
+    title: 'Mensuration',
+    chapter_number: 6,
+    page_start: 185,
+    page_end: 204,
+    topics_count: 4,
+    status: 'verified',
+  },
+  {
+    id: 'c6-chap-7-algebra',
+    document_id: 'doc-class6-math',
+    title: 'Algebra',
+    chapter_number: 7,
+    page_start: 205,
+    page_end: 220,
+    topics_count: 4,
+    status: 'verified',
+  },
+  {
+    id: 'c6-chap-8-ratio-prop',
+    document_id: 'doc-class6-math',
+    title: 'Ratio and Proportion',
+    chapter_number: 8,
+    page_start: 46,
+    page_end: 67,
+    topics_count: 4,
+    status: 'verified',
+  },
+];
+
+export const CLASS_VI_MATH_TOPICS: Topic[] = [
+  // Integers
+  { id: 'c6-top-1-1', chapter_id: 'c6-chap-1-integers', document_id: 'doc-class6-math', title: 'Concept of Negative Numbers & Number Line' },
+  { id: 'c6-top-1-2', chapter_id: 'c6-chap-1-integers', document_id: 'doc-class6-math', title: 'Ordering & Comparison of Integers' },
+  { id: 'c6-top-1-3', chapter_id: 'c6-chap-1-integers', document_id: 'doc-class6-math', title: 'Addition of Integers & Additive Inverse' },
+  { id: 'c6-top-1-4', chapter_id: 'c6-chap-1-integers', document_id: 'doc-class6-math', title: 'Subtraction of Integers on Number Line' },
+  // Fractions
+  { id: 'c6-top-2-1', chapter_id: 'c6-chap-2-fractions', document_id: 'doc-class6-math', title: 'Fraction on the Number Line & Proper/Improper' },
+  { id: 'c6-top-2-2', chapter_id: 'c6-chap-2-fractions', document_id: 'doc-class6-math', title: 'Equivalent Fractions & Simplest Form' },
+  { id: 'c6-top-2-3', chapter_id: 'c6-chap-2-fractions', document_id: 'doc-class6-math', title: 'Like and Unlike Fractions & Comparison' },
+  { id: 'c6-top-2-4', chapter_id: 'c6-chap-2-fractions', document_id: 'doc-class6-math', title: 'Addition and Subtraction of Fractions' },
+  // Decimals
+  { id: 'c6-top-3-1', chapter_id: 'c6-chap-3-decimals', document_id: 'doc-class6-math', title: 'Tenths, Hundredths & Place Value Chart' },
+  { id: 'c6-top-3-2', chapter_id: 'c6-chap-3-decimals', document_id: 'doc-class6-math', title: 'Conversion between Fractions and Decimals' },
+  { id: 'c6-top-3-3', chapter_id: 'c6-chap-3-decimals', document_id: 'doc-class6-math', title: 'Comparison & Money/Length/Weight Units' },
+  { id: 'c6-top-3-4', chapter_id: 'c6-chap-3-decimals', document_id: 'doc-class6-math', title: 'Addition and Subtraction of Decimals' },
+  // Geometry
+  { id: 'c6-top-4-1', chapter_id: 'c6-chap-4-geometry', document_id: 'doc-class6-math', title: 'Points, Line Segment, Ray and Intersecting Lines' },
+  { id: 'c6-top-4-2', chapter_id: 'c6-chap-4-geometry', document_id: 'doc-class6-math', title: 'Parallel Lines and Collinear Points' },
+  { id: 'c6-top-4-3', chapter_id: 'c6-chap-4-geometry', document_id: 'doc-class6-math', title: 'Angles, Vertex and Arms of an Angle' },
+  { id: 'c6-top-4-4', chapter_id: 'c6-chap-4-geometry', document_id: 'doc-class6-math', title: 'Triangles, Quadrilaterals and Polygons' },
+  { id: 'c6-top-4-5', chapter_id: 'c6-chap-4-geometry', document_id: 'doc-class6-math', title: 'Circles: Center, Radius, Diameter, Chord, Arc, Sector' },
+  // Elementary Shapes
+  { id: 'c6-top-5-1', chapter_id: 'c6-chap-5-elem-shapes', document_id: 'doc-class6-math', title: 'Measuring Line Segments & Types of Angles' },
+  { id: 'c6-top-5-2', chapter_id: 'c6-chap-5-elem-shapes', document_id: 'doc-class6-math', title: 'Perpendicular Lines and Perpendicular Bisector' },
+  { id: 'c6-top-5-3', chapter_id: 'c6-chap-5-elem-shapes', document_id: 'doc-class6-math', title: 'Classification of Triangles (Scalene, Isosceles, Equilateral)' },
+  { id: 'c6-top-5-4', chapter_id: 'c6-chap-5-elem-shapes', document_id: 'doc-class6-math', title: 'Quadrilaterals (Square, Rectangle, Parallelogram, Rhombus, Trapezium)' },
+  // Mensuration
+  { id: 'c6-top-6-1', chapter_id: 'c6-chap-6-mensuration', document_id: 'doc-class6-math', title: 'Perimeter of Rectangle and Regular Polygon' },
+  { id: 'c6-top-6-2', chapter_id: 'c6-chap-6-mensuration', document_id: 'doc-class6-math', title: 'Word Problems on Perimeter & Fencing' },
+  { id: 'c6-top-6-3', chapter_id: 'c6-chap-6-mensuration', document_id: 'doc-class6-math', title: 'Area of Rectangle and Square' },
+  { id: 'c6-top-6-4', chapter_id: 'c6-chap-6-mensuration', document_id: 'doc-class6-math', title: 'Tiling Problems and Unit Conversions' },
+  // Algebra
+  { id: 'c6-top-7-1', chapter_id: 'c6-chap-7-algebra', document_id: 'doc-class6-math', title: 'Matchstick Patterns & Introduction to Variables' },
+  { id: 'c6-top-7-2', chapter_id: 'c6-chap-7-algebra', document_id: 'doc-class6-math', title: 'Common Rules from Arithmetic and Geometry' },
+  { id: 'c6-top-7-3', chapter_id: 'c6-chap-7-algebra', document_id: 'doc-class6-math', title: 'Expressions with Variables and Verbal Translation' },
+  { id: 'c6-top-7-4', chapter_id: 'c6-chap-7-algebra', document_id: 'doc-class6-math', title: 'Simple Linear Equations and Solution by Trial/Transposition' },
+  // Ratio and Proportion
+  { id: 'c6-top-8-1', chapter_id: 'c6-chap-8-ratio-prop', document_id: 'doc-class6-math', title: 'Concept of Ratio & Simplest Form' },
+  { id: 'c6-top-8-2', chapter_id: 'c6-chap-8-ratio-prop', document_id: 'doc-class6-math', title: 'Equivalent Ratios and Comparison' },
+  { id: 'c6-top-8-3', chapter_id: 'c6-chap-8-ratio-prop', document_id: 'doc-class6-math', title: 'Proportion and Extremes / Means Rule' },
+  { id: 'c6-top-8-4', chapter_id: 'c6-chap-8-ratio-prop', document_id: 'doc-class6-math', title: 'Unitary Method and Real-life Applications' },
+];
+
+export const CLASS_VI_MATH_CHUNKS: KnowledgeChunk[] = [
+  // Integers
+  {
+    id: 'chunk-c6-int-1',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-1-integers',
+    topic_id: 'c6-top-1-1',
+    page_start: 112,
+    page_end: 115,
+    extraction_confidence: 0.98,
+    text: `Chapter 1: Integers - Negative Numbers and The Number Line (Pages 112–115).
+Collection of Numbers:
+Natural numbers: 1, 2, 3, 4, ...
+Whole numbers: 0, 1, 2, 3, ...
+Negative numbers: -1, -2, -3, -4, ... which represent quantities below zero (e.g. temperature below freezing, financial debt, depth below sea level).
+Integers (Z) = {..., -3, -2, -1, 0, 1, 2, 3, ...}.
+Zero (0) is an integer which is neither positive nor negative.
+On a horizontal number line:
+1. Positive integers lie to the right of 0, and negative integers lie to the left of 0.
+2. Every integer to the right of another integer is greater than it (e.g. -2 > -5, 0 > -3).
+3. The absolute value of an integer x, denoted |x|, is its numerical value regardless of sign: |-7| = 7, |+5| = 5, |0| = 0.
+বাংলা অনুবাদ:
+পূর্ণসংখ্যা (Integers): ধনাত্মক সংখ্যা, শূন্য এবং ঋণাত্মক সংখ্যাগুলিকে একত্রে পূর্ণসংখ্যা বলে। সংখ্যারেখায় শূন্যের ডানদিকের সংখ্যা ধনাত্মক এবং বাঁদিকের সংখ্যা ঋণাত্মক। সংখ্যারেখায় যেকোনো সংখ্যার ডানদিকের সংখ্যাটি সর্বদাই বড় হয় (যেমন -২ > -৫)।`,
+  },
+  {
+    id: 'chunk-c6-int-2',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-1-integers',
+    topic_id: 'c6-top-1-3',
+    page_start: 120,
+    page_end: 124,
+    extraction_confidence: 0.98,
+    text: `Chapter 1: Integers - Addition, Subtraction and Additive Inverse (Pages 120–124).
+Rules for Operations on Integers:
+1. Adding two positive integers: Add their values and keep positive sign: (+4) + (+7) = +11.
+2. Adding two negative integers: Add their values and put a negative sign: (-5) + (-8) = -13.
+3. Adding one positive and one negative integer: Subtract the smaller numerical value from the larger, and attach the sign of the integer with the larger absolute value: (+9) + (-14) = -5; (-6) + (+11) = +5.
+4. Additive Inverse: Two numbers whose sum is zero are called additive inverses of each other: a + (-a) = 0.
+Example: Additive inverse of +8 is -8; additive inverse of -23 is +23.
+5. Subtraction Rule: To subtract an integer b from a, add the additive inverse of b to a:
+a - b = a + (-b)
+Example: (-15) - (-8) = (-15) + (+8) = -7.
+Example: (+12) - (+19) = 12 + (-19) = -7.
+বাংলা অনুবাদ:
+পূর্ণসংখ্যার যোগ ও বিয়োগ: দুটি ঋণাত্মক পূর্ণসংখ্যার যোগফল সর্বদা ঋণাত্মক। বিপরীত সংখ্যা (Additive inverse): a-এর বিপরীত সংখ্যা হলো (-a), কারণ a + (-a) = ০। বিয়োগ করার নিয়ম: কোনো সংখ্যা বিয়োগ করা মানে তার বিপরীত সংখ্যা যোগ করা (a - b = a + (-b))।`,
+  },
+  // Fractions
+  {
+    id: 'chunk-c6-frac-1',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-2-fractions',
+    topic_id: 'c6-top-2-1',
+    page_start: 135,
+    page_end: 139,
+    extraction_confidence: 0.98,
+    text: `Chapter 2: Fractions - Types, Equivalence and Simplest Form (Pages 135–139).
+A fraction represents a part of a whole or a collection: Fraction = Numerator / Denominator (where denominator ≠ 0).
+Types of Fractions:
+1. Proper Fraction: Numerator < Denominator (e.g. 3/7, 5/9, value < 1).
+2. Improper Fraction: Numerator ≥ Denominator (e.g. 11/4, 7/3, value ≥ 1).
+3. Mixed Fraction: A combination of a whole number and a proper fraction (e.g. 2 ¾ = (2×4 + 3)/4 = 11/4).
+4. Equivalent Fractions: Two fractions that represent the same part of a whole: (a/b) = (a×k)/(b×k).
+Example: 2/5 = 4/10 = 6/15 = 8/20.
+Simplest Form (Lowest Terms): A fraction is in simplest form if the HCF of its numerator and denominator is 1.
+Example: 36/48 divided by HCF(36,48)=12 gives 3/4.
+বাংলা অনুবাদ:
+ভগ্নাংশ: প্রকৃত ভগ্নাংশ (লব < হর), অপ্রকৃত ভগ্নাংশ (লব ≥ হর) এবং মিশ্র ভগ্নাংশ। সমতুল্য ভগ্নাংশ: লব ও হরকে একই অশূন্য সংখ্যা দিয়ে গুণ বা ভাগ করলে সমতুল্য ভগ্নাংশ পাওয়া যায়। লঘিষ্ঠ আকার: লব ও হরের গসাগু ১ হলে ভগ্নাংশটি লঘিষ্ঠ আকারে থাকে।`,
+  },
+  {
+    id: 'chunk-c6-frac-2',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-2-fractions',
+    topic_id: 'c6-top-2-4',
+    page_start: 148,
+    page_end: 154,
+    extraction_confidence: 0.98,
+    text: `Chapter 2: Fractions - Addition and Subtraction of Unlike Fractions (Pages 148–154).
+Like fractions have the same denominator (e.g. 2/9 and 5/9). Sum = (2+5)/9 = 7/9.
+Unlike fractions have different denominators (e.g. 3/8 and 5/12).
+Algorithm to add or subtract unlike fractions:
+Step 1: Find the LCM (Least Common Multiple) of the denominators.
+LCM(8, 12) = 24.
+Step 2: Convert each fraction into an equivalent fraction with denominator equal to LCM:
+3/8 = (3×3)/(8×3) = 9/24
+5/12 = (5×2)/(12×2) = 10/24
+Step 3: Add or subtract numerators over the common denominator:
+3/8 + 5/12 = (9 + 10)/24 = 19/24.
+Subtraction Example:
+4/5 - 2/3: LCM(5,3) = 15.
+4/5 = 12/15, 2/3 = 10/15.
+Difference = (12 - 10)/15 = 2/15.
+Mixed fraction addition: 2 ½ + 3 ⅓ = (5/2) + (10/3) = (15 + 20)/6 = 35/6 = 5 ⅚.
+বাংলা অনুবাদ:
+অসম হরবিশিষ্ট ভগ্নাংশের যোগ ও বিয়োগ: প্রথমে হরগুলির লসাগু নির্ণয় করতে হয়। তারপর সমতুল্য ভগ্নাংশে রূপান্তরিত করে লবগুলির যোগ বা বিয়োগ করতে হয়।`,
+  },
+  // Decimals
+  {
+    id: 'chunk-c6-dec-1',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-3-decimals',
+    topic_id: 'c6-top-3-1',
+    page_start: 164,
+    page_end: 170,
+    extraction_confidence: 0.98,
+    text: `Chapter 3: Decimals - Tenths, Hundredths, Place Value and Operations (Pages 164–170).
+Place Value Structure:
+Thousands (1000) | Hundreds (100) | Tens (10) | Ones (1) . Tenths (1/10) | Hundredths (1/100) | Thousandths (1/1000).
+Example: In 253.48, the place value of 4 is 4/10 (four tenths) and of 8 is 8/100 (eight hundredths).
+Conversion:
+Fraction to decimal: 7/10 = 0.7; 3/100 = 0.03; 235/100 = 2.35.
+Decimal to fraction: 0.45 = 45/100 = 9/20.
+Unit Conversions:
+Money: 1 Rupee = 100 paise => 65 paise = ₹ 0.65; ₹ 8 and 75 paise = ₹ 8.75.
+Length: 1 m = 100 cm => 4 cm = 0.04 m; 1 km = 1000 m => 350 m = 0.35 km.
+Weight: 1 kg = 1000 g => 450 g = 0.45 kg; 5 kg 75 g = 5.075 kg.
+Addition and Subtraction of Decimals:
+Align decimal points vertically before operating:
+Example: Add 18.42 + 9.7 + 0.356 = 18.420 + 9.700 + 0.356 = 28.476.
+Subtract: 34.5 - 19.85 = 34.50 - 19.85 = 14.65.
+বাংলা অনুবাদ:
+দশমিক ভগ্নাংশ: দশাংশ (১/১০), শতাংশ (১/১০০), সহস্রাংশ (১/১০০০)। দশমিক বিন্দুর স্থান সুনির্দিষ্ট রেখে যোগ ও বিয়োগ সম্পন্ন করতে হয়। ১০০ পয়সা = ১ টাকা, ১০০০ গ্রাম = ১ কেজি।`,
+  },
+  // Basic Geometrical Ideas
+  {
+    id: 'chunk-c6-geom-1',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-4-geometry',
+    topic_id: 'c6-top-4-1',
+    page_start: 70,
+    page_end: 78,
+    extraction_confidence: 0.98,
+    text: `Chapter 4: Basic Geometrical Ideas - Points, Lines, Angles and Polygons (Pages 70–78).
+Fundamental Definitions:
+1. Point: A dimensionless mark of position, denoted by a capital letter (A, P).
+2. Line Segment: Shortest path between two points. It has two definite endpoints and a measurable length. Symbol: AB.
+3. Line: Extends endlessly in both directions. It has no endpoints and no fixed length. Symbol: ↔AB.
+4. Ray: A portion of a line starting at a fixed initial point and going endlessly in one direction. Symbol: →OA.
+5. Intersecting Lines: Two distinct lines having exactly one common point.
+6. Parallel Lines: Lines in the same plane that never intersect, maintaining a constant perpendicular distance.
+Polygons and Angles:
+- Angle: Formed when two rays share a common initial point (vertex). Symbol: ∠ABC.
+- Polygon: A simple closed figure made entirely of line segments. Triangle (3 sides), Quadrilateral (4 sides), Pentagon (5 sides).
+- Circle: A simple closed curve where every boundary point is equidistant from the center.
+Diameter = 2 × Radius (d = 2r). Chord joins any two points on circle; the diameter is the longest chord.
+বাংলা অনুবাদ:
+জ্যামিতির মৌলিক ধারণা: বিন্দু, রেখাংশ (নির্দিষ্ট দৈর্ঘ্য আছে), সরলরেখা (উভয়দিকে অসীম), রশ্মি (একটি আদিবিন্দু আছে)। কোণ (∠ABC), বহুভুজ, এবং বৃত্ত। ব্যাস = ২ × ব্যাসার্ধ (d = 2r)। ব্যাস হলো বৃত্তের বৃহত্তম জ্যা।`,
+  },
+  // Mensuration
+  {
+    id: 'chunk-c6-mens-1',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-6-mensuration',
+    topic_id: 'c6-top-6-1',
+    page_start: 188,
+    page_end: 198,
+    extraction_confidence: 0.99,
+    text: `Chapter 6: Mensuration - Perimeter and Area (Pages 188–198).
+Perimeter: The total length of the continuous boundary enclosing a closed figure.
+Formulas for Perimeter:
+1. Rectangle: Perimeter = 2 × (Length + Breadth) = 2(l + b).
+2. Square: Perimeter = 4 × Side = 4s.
+3. Equilateral Triangle: Perimeter = 3 × Side = 3s.
+4. Regular Polygon with n sides: Perimeter = n × length of one side.
+Area: The amount of region enclosed inside the boundary of a closed planar figure.
+Formulas for Area:
+1. Rectangle: Area = Length × Breadth = l × b (Unit: sq cm or m²).
+2. Square: Area = Side × Side = s² (Unit: sq cm or m²).
+Practical Word Problem Standard:
+Cost of fencing around a rectangular park = Perimeter × Cost per meter.
+Cost of paving tiles / flooring = Area × Cost per square meter.
+Number of tiles required = (Total area of floor) / (Area of one tile).
+Example: A room is 8 m long and 6 m wide. Its perimeter = 2(8+6) = 28 m. Its area = 8 × 6 = 48 m².
+বাংলা অনুবাদ:
+পরিমিতি (Mensuration): পরিসীমা = কোনো বদ্ধ ক্ষেত্রের চারপাশের মোট সীমানার দৈর্ঘ্য। আয়তক্ষেত্রের পরিসীমা = ২ × (দৈর্ঘ্য + প্রস্থ)। বর্গক্ষেত্রের পরিসীমা = ৪ × বাহুর দৈর্ঘ্য। ক্ষেত্রফল: আয়তক্ষেত্রের ক্ষেত্রফল = দৈর্ঘ্য × প্রস্থ। বর্গক্ষেত্রের ক্ষেত্রফল = বাহু × বাহু।`,
+  },
+  // Algebra
+  {
+    id: 'chunk-c6-alg-1',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-7-algebra',
+    topic_id: 'c6-top-7-1',
+    page_start: 208,
+    page_end: 218,
+    extraction_confidence: 0.98,
+    text: `Chapter 7: Algebra - Variables, Expressions and Linear Equations (Pages 208–218).
+Concept of Variable:
+A variable is a quantity that can take various numerical values; its value is not fixed. It is represented by letters such as x, y, z, m, n, p.
+Constants have fixed numerical values (e.g. 5, -8, 12).
+Algebraic Expressions:
+Operations (+, -, ×, ÷) performed on variables and constants.
+1. "5 added to x" = x + 5.
+2. "7 subtracted from 3 times y" = 3y - 7.
+3. "Product of m and 4 divided by 9" = 4m / 9.
+Equation:
+An equation is a condition on a variable containing an equality sign '=' between two expressions: LHS = RHS.
+Solving Simple Linear Equations:
+1. x + 7 = 15  =>  x = 15 - 7  =>  x = 8.
+2. y - 9 = 4   =>  y = 4 + 9   =>  y = 13.
+3. 4m = 28     =>  m = 28 / 4  =>  m = 7.
+4. p / 5 = 6   =>  p = 6 × 5   =>  p = 30.
+5. 2n + 3 = 11 =>  2n = 11 - 3 = 8 => n = 4.
+The value of the variable that makes LHS equal to RHS is called the solution or root of the equation.
+বাংলা অনুবাদ:
+বীজগণিত: চলরাশি (Variable) হলো যার মান নির্দিষ্ট নয় (যেমন x, y, z)। ধ্রুবক (Constant)-এর মান নির্দিষ্ট। সমীকরণ (Equation): সমান চিহ্নের দুই পাশে রাশিমালা থাকে (LHS = RHS)। সমীকরণ সমাধান: চলরাশির যে মানের জন্য উভয় পক্ষ সমান হয় তাকে সমীকরণের বীজ বা সমাধান বলে।`,
+  },
+  // Ratio and Proportion
+  {
+    id: 'chunk-c6-ratio-1',
+    document_id: 'doc-class6-math',
+    chapter_id: 'c6-chap-8-ratio-prop',
+    topic_id: 'c6-top-8-1',
+    page_start: 48,
+    page_end: 58,
+    extraction_confidence: 0.98,
+    text: `Chapter 8: Ratio and Proportion - Ratios, Proportions and Unitary Method (Pages 48–58).
+Ratio: A comparison of two quantities of the same kind by division. The ratio of a to b is written as a : b or a/b (b ≠ 0).
+Rules:
+1. The quantities compared must be in the same units (e.g. compare 20 cm and 1.5 m -> convert 1.5 m to 150 cm -> ratio is 20 : 150 = 2 : 15).
+2. A ratio has no unit.
+Proportion: An equality of two ratios: a : b = c : d, written as a : b :: c : d.
+Terms: a and d are called extreme terms (extremes); b and c are called middle terms (means).
+Rule of Proportion: Product of Extremes = Product of Means (a × d = b × c).
+Unitary Method:
+The method in which first we find the value of one unit, and then the value of the required number of units.
+Example: If cost of 6 pens is ₹ 72, then cost of 1 pen = 72 / 6 = ₹ 12.
+Cost of 11 pens = 11 × 12 = ₹ 132.
+বাংলা অনুবাদ:
+অনুপাত ও সমানুপাত: দুটি সমজাতীয় রাশির তুলনামূলক সম্পর্ককে অনুপাত বলে (a : b)। অনুপাতের কোনো একক থাকে না। চারটি রাশি a, b, c, d সমানুপাতে থাকলে প্রান্তীয় পদদ্বয়ের গুণফল = মধ্যম পদদ্বয়ের গুণফল (a × d = b × c)। ঐকিক নিয়ম: প্রথমে একটির মান বের করে প্রয়োজনীয় সংখ্যক রাশির মান নির্ণয় করা।`,
+  },
+];
+
+export const DEFAULT_SECTION_BLUEPRINTS: SectionBlueprint[] = [
+  {
+    id: 'sec-a',
+    name: 'Section A',
+    description: 'Multiple Choice & Very Short Answer (1 mark each)',
+    marksPerQuestion: 1,
+    numberOfQuestions: 10,
+    totalSectionMarks: 10,
+    questionType: 'mcq',
+  },
+  {
+    id: 'sec-b',
+    name: 'Section B',
+    description: 'Short Answer Type I (2 marks each)',
+    marksPerQuestion: 2,
+    numberOfQuestions: 10,
+    totalSectionMarks: 20,
+    questionType: 'short_answer',
+  },
+  {
+    id: 'sec-c',
+    name: 'Section C',
+    description: 'Short Answer Type II (3 marks each)',
+    marksPerQuestion: 3,
+    numberOfQuestions: 8,
+    totalSectionMarks: 24,
+    questionType: 'short_answer',
+  },
+  {
+    id: 'sec-d',
+    name: 'Section D',
+    description: 'Long Answer / Application Problem (4 marks each)',
+    marksPerQuestion: 4,
+    numberOfQuestions: 4,
+    totalSectionMarks: 16,
+    questionType: 'long_answer',
+  },
+];
+

@@ -168,3 +168,83 @@ export interface PipelineStep {
   description: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
 }
+
+export type WeightageMode = 'exact_marks' | 'percentage' | 'equal';
+
+export interface ChapterWeightage {
+  chapter_id: string;
+  chapter_title: string;
+  chapter_number: number;
+  included: boolean;
+  marks: number;
+  percentage: number;
+  locked: boolean;
+  assigned_questions_count: number;
+}
+
+export interface SectionBlueprint {
+  id: string;
+  name: string;
+  description: string;
+  marksPerQuestion: number;
+  numberOfQuestions: number;
+  totalSectionMarks: number;
+  questionType: QuestionType;
+}
+
+export interface QuestionSlot {
+  slotNumber: number;
+  sectionId: string;
+  sectionName: string;
+  chapterId: string;
+  chapterTitle: string;
+  marks: number;
+  questionType: QuestionType;
+  difficulty: DifficultyLevel;
+  status: 'pending' | 'generating' | 'generated' | 'failed' | 'source_required';
+  questionItem?: QuestionItem;
+  errorReason?: string;
+}
+
+export interface ChapterHealthCheck {
+  chapterId: string;
+  chapterTitle: string;
+  expectedMarks: number;
+  actualMarks: number;
+  passed: boolean;
+}
+
+export interface PaperHealth {
+  totalMarksExpected: number;
+  totalMarksActual: number;
+  totalQuestionsExpected: number;
+  totalQuestionsActual: number;
+  chapterChecks: ChapterHealthCheck[];
+  allChaptersPassed: boolean;
+  answerKeysCount: number;
+  markingSchemesCount: number;
+  duplicateCount: number;
+  sourceGroundingPassed: boolean;
+  isReady: boolean;
+}
+
+export interface ClassVIExamPaper {
+  id: string;
+  title: string;
+  schoolName: string;
+  className: string;
+  subject: string;
+  totalMarks: number;
+  timeAllowed: string;
+  documentId: string;
+  bookTitle: string;
+  weightageMode: WeightageMode;
+  chaptersWeightage: ChapterWeightage[];
+  sections: SectionBlueprint[];
+  slots: QuestionSlot[];
+  paperHealth: PaperHealth;
+  status: 'draft' | 'configuring' | 'blueprint_ready' | 'generating' | 'ready';
+  created_at: string;
+  updated_at: string;
+}
+

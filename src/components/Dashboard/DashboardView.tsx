@@ -10,6 +10,7 @@ import {
   Clock,
   ChevronRight,
   ShieldCheck,
+  Calculator,
 } from 'lucide-react';
 import { DocumentItem, QuestionItem, User } from '../../types';
 
@@ -22,6 +23,7 @@ interface DashboardViewProps {
   onOpenBook: (bookId: string) => void;
   onViewQuestions: () => void;
   onOpenQuestionReview: (question: QuestionItem) => void;
+  onExamBuilderClick?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -33,6 +35,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenBook,
   onViewQuestions,
   onOpenQuestionReview,
+  onExamBuilderClick,
 }) => {
   const approvedQuestions = questions.filter((q) => q.status === 'approved');
   const totalChapters = documents.reduce(
@@ -77,6 +80,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Sparkles className="w-4 h-4 text-amber-400" />
             <span>Generate Question</span>
           </button>
+        </div>
+      </div>
+
+      {/* Class VI Mathematics Mode Spotlight Card */}
+      <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-2xl p-6 shadow-md border border-slate-800 relative overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+          <div className="space-y-2 max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full">
+                Hard-Constraint Exam Module
+              </span>
+              <span className="text-xs font-semibold bg-white/10 text-slate-200 px-2.5 py-0.5 rounded-md">
+                Class: VI · Subject: Mathematics · Total: 70 Marks
+              </span>
+            </div>
+            <h2 className="text-xl font-bold tracking-tight text-white">
+              Class VI Summative Mathematics Question Paper (70 Marks)
+            </h2>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Engineered for real school summative examinations. Chapter weightage is treated as a hard mathematical constraint that cannot be overridden by Gemini. Deterministic rules assign question slots, verify source textbook grounding, and await your strict approval.
+            </p>
+            <div className="flex flex-wrap items-center gap-4 pt-1 text-[11px] text-slate-300 font-medium">
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                Exact 70/70 Marks Lock
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                Section A (10M), B (20M), C (20M), D (20M)
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                NCERT / WBBSE Syllabus Grounding
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row lg:flex-col gap-2 shrink-0">
+            {onExamBuilderClick && (
+              <button
+                onClick={onExamBuilderClick}
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-bold transition-all shadow-md active:scale-98 cursor-pointer"
+              >
+                <Calculator className="w-4 h-4 text-slate-950" />
+                <span>Open 70M Exam Builder</span>
+                <ArrowRight className="w-4 h-4 text-slate-950" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

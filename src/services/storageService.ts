@@ -1,5 +1,21 @@
 import { DocumentItem, Chapter, Topic, KnowledgeChunk, QuestionItem, QuestionFeedback, User } from '../types';
-import { DEMO_BOOK, DEMO_CHAPTERS, DEMO_TOPICS, DEMO_KNOWLEDGE_CHUNKS, DEMO_QUESTIONS, INITIAL_USER } from '../data/demoData';
+import {
+  DEMO_BOOK,
+  DEMO_CHAPTERS,
+  DEMO_TOPICS,
+  DEMO_KNOWLEDGE_CHUNKS,
+  DEMO_QUESTIONS,
+  INITIAL_USER,
+  CLASS_VI_MATH_BOOK,
+  CLASS_VI_MATH_CHAPTERS,
+  CLASS_VI_MATH_TOPICS,
+  CLASS_VI_MATH_CHUNKS,
+} from '../data/demoData';
+
+const ALL_INITIAL_BOOKS = [CLASS_VI_MATH_BOOK, DEMO_BOOK];
+const ALL_INITIAL_CHAPTERS = [...CLASS_VI_MATH_CHAPTERS, ...DEMO_CHAPTERS];
+const ALL_INITIAL_TOPICS = [...CLASS_VI_MATH_TOPICS, ...DEMO_TOPICS];
+const ALL_INITIAL_CHUNKS = [...CLASS_VI_MATH_CHUNKS, ...DEMO_KNOWLEDGE_CHUNKS];
 
 const STORAGE_KEYS = {
   USER: 'ai_qpm_user',
@@ -36,13 +52,23 @@ class StorageService {
   }
 
   public getDocuments(): DocumentItem[] {
-    if (!this.isBrowser()) return [DEMO_BOOK];
+    if (!this.isBrowser()) return ALL_INITIAL_BOOKS;
     const data = localStorage.getItem(STORAGE_KEYS.DOCUMENTS);
+    let docs: DocumentItem[] = [];
     if (!data) {
-      localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify([DEMO_BOOK]));
-      return [DEMO_BOOK];
+      docs = ALL_INITIAL_BOOKS;
+      localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(docs));
+    } else {
+      docs = JSON.parse(data);
+      // Auto-migrate: ensure Class VI Math book is present
+      for (const initialBook of ALL_INITIAL_BOOKS) {
+        if (!docs.some((d) => d.id === initialBook.id)) {
+          docs.unshift(initialBook);
+        }
+      }
+      localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(docs));
     }
-    return JSON.parse(data);
+    return docs;
   }
 
   public saveDocument(doc: DocumentItem): void {
@@ -69,14 +95,21 @@ class StorageService {
   }
 
   public getChapters(documentId?: string): Chapter[] {
-    if (!this.isBrowser()) return DEMO_CHAPTERS;
+    if (!this.isBrowser()) return ALL_INITIAL_CHAPTERS;
     const data = localStorage.getItem(STORAGE_KEYS.CHAPTERS);
     let chapters: Chapter[] = [];
     if (!data) {
-      chapters = DEMO_CHAPTERS;
+      chapters = ALL_INITIAL_CHAPTERS;
       localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(chapters));
     } else {
       chapters = JSON.parse(data);
+      // Auto-migrate
+      for (const initChap of ALL_INITIAL_CHAPTERS) {
+        if (!chapters.some((c) => c.id === initChap.id)) {
+          chapters.push(initChap);
+        }
+      }
+      localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(chapters));
     }
     return documentId ? chapters.filter((c) => c.document_id === documentId) : chapters;
   }
@@ -98,14 +131,20 @@ class StorageService {
   }
 
   public getTopics(chapterId?: string): Topic[] {
-    if (!this.isBrowser()) return DEMO_TOPICS;
+    if (!this.isBrowser()) return ALL_INITIAL_TOPICS;
     const data = localStorage.getItem(STORAGE_KEYS.TOPICS);
     let topics: Topic[] = [];
     if (!data) {
-      topics = DEMO_TOPICS;
+      topics = ALL_INITIAL_TOPICS;
       localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(topics));
     } else {
       topics = JSON.parse(data);
+      for (const initTop of ALL_INITIAL_TOPICS) {
+        if (!topics.some((t) => t.id === initTop.id)) {
+          topics.push(initTop);
+        }
+      }
+      localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(topics));
     }
     return chapterId ? topics.filter((t) => t.chapter_id === chapterId) : topics;
   }
