@@ -244,6 +244,48 @@ class StorageService {
     localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(chapters));
   }
 
+  /**
+   * Authoritatively replaces all stored chapters for a document with the teacher-confirmed list.
+   * 1. Removes ALL existing stored chapters belonging to that document.
+   * 2. Stores ONLY the teacher-confirmed verifiedChapters.
+   * 3. Removes topics belonging to deleted chapters where appropriate.
+   * 4. Removes obsolete knowledge chunks before rebuilt chunks are saved.
+   * 5. Preserves other documents completely.
+   */
+  public replaceChaptersForDocument(documentId: string, verifiedChapters: Chapter[]): void {
+    if (!this.isBrowser()) return;
+
+    // 1. Get existing chapters, identify deleted chapters for this document
+    const allChapters = this.getChapters();
+    const verifiedIds = new Set(verifiedChapters.map((c) => c.id));
+    const deletedChapterIds = new Set(
+      allChapters
+        .filter((c) => c.document_id === documentId && !verifiedIds.has(c.id))
+        .map((c) => c.id)
+    );
+
+    // 2. Remove ALL existing stored chapters belonging to this document & store ONLY verifiedChapters
+    const preservedChapters = allChapters.filter((c) => c.document_id !== documentId);
+    const updatedChapters = [...preservedChapters, ...verifiedChapters];
+    localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(updatedChapters));
+
+    // 3. Remove topics belonging to deleted chapters where appropriate
+    if (deletedChapterIds.size > 0) {
+      const allTopics = this.getTopics();
+      const preservedTopics = allTopics.filter(
+        (t) => !deletedChapterIds.has(t.chapter_id)
+      );
+      localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(preservedTopics));
+    }
+
+    // 4. Remove obsolete knowledge chunks belonging to this document or deleted chapters
+    const allChunks = this.getChunks();
+    const preservedChunks = allChunks.filter(
+      (c) => c.document_id !== documentId && !deletedChapterIds.has(c.chapter_id)
+    );
+    localStorage.setItem(STORAGE_KEYS.CHUNKS, JSON.stringify(preservedChunks));
+  }
+
   public getTopics(chapterId?: string): Topic[] {
     if (!this.isBrowser()) return ALL_INITIAL_TOPICS;
     const data = localStorage.getItem(STORAGE_KEYS.TOPICS);

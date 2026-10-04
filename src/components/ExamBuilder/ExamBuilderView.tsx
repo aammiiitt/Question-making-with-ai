@@ -186,6 +186,116 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
     );
   }
 
+  // Requirement 2: If no obvious Mathematics book is detected but one or more real uploaded documents exist:
+  // DO NOT remain on an indefinite Loading screen.
+  // Show: SELECT TEXTBOOK FOR CLASS VI MATHEMATICS EXAM
+  // Display the real uploaded documents in a dropdown/list. Require teacher to explicitly choose one.
+  if (!currentBook && realDocuments.length > 0) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 pt-4">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full">
+                Textbook Selection
+              </span>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                SELECT TEXTBOOK FOR CLASS VI MATHEMATICS EXAM
+              </h1>
+              <p className="text-xs text-slate-500">
+                Please explicitly choose which uploaded textbook PDF to index and use for this 70-mark examination paper.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={onOpenUpload}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer self-start sm:self-auto shrink-0"
+            >
+              <Upload className="w-4 h-4 text-amber-400" />
+              <span>Upload Another PDF</span>
+            </button>
+          </div>
+
+          {/* Document list & dropdown */}
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Uploaded Textbooks Available ({realDocuments.length})
+              </p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">Quick Select:</span>
+                <select
+                  aria-label="Select textbook for exam"
+                  value={selectedBookId}
+                  onChange={(e) => {
+                    const chosen = realDocuments.find((d) => d.id === e.target.value);
+                    if (chosen) {
+                      setSelectedBookId(chosen.id);
+                      setCurrentBook(chosen);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-800"
+                >
+                  <option value="">-- Choose a textbook --</option>
+                  {realDocuments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.title} ({d.page_count} pages)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              {realDocuments.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/20 transition-all bg-white shadow-2xs"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 border border-indigo-100 mt-0.5">
+                      <BookOpen className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-bold text-slate-900">{doc.title}</h3>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            doc.teacher_confirmed
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {doc.teacher_confirmed ? 'Teacher Verified ✓' : 'Verification Pending'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        File: <span className="font-medium text-slate-700">{doc.file_name}</span> · {doc.page_count} Physical Pages · {doc.detected_chapters_count || 0} Chapters · Language: {doc.language || 'English'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBookId(doc.id);
+                      setCurrentBook(doc);
+                    }}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer shrink-0"
+                  >
+                    <span>Select for Exam</span>
+                    <ChevronDown className="w-3.5 h-3.5 -rotate-90" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!paper || !currentBook) {
     return (
       <div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
@@ -195,10 +305,12 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
     );
   }
 
-  // Requirement 3 & 5: Handler for confirming physical chapter mapping
+  // Requirement 3 & 5 & 1: Handler for confirming physical chapter mapping
   const handleConfirmChapterMapping = async (verifiedChapters: Chapter[]) => {
     // 1. Rebuild chunks and strictly validate for real books
     const docPages = storageService.getDocumentPages(currentBook.id);
+    let rebuiltChunks: any[] | null = null;
+
     if (!currentBook.is_demo) {
       if (!docPages || docPages.length === 0) {
         throw new Error(
@@ -239,7 +351,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
         }
       }
 
-      storageService.replaceChunksForDocument(currentBook.id, data.chunks);
+      rebuiltChunks = data.chunks;
     } else if (docPages.length > 0) {
       try {
         const res = await fetch('/api/rebuild-chapter-chunks', {
@@ -254,7 +366,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
         if (res.ok) {
           const data = await res.json();
           if (data.chunks && Array.isArray(data.chunks)) {
-            storageService.replaceChunksForDocument(currentBook.id, data.chunks);
+            rebuiltChunks = data.chunks;
           }
         }
       } catch (e) {
@@ -262,11 +374,16 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
       }
     }
 
-    // 2. Save all updated chapters to storage
-    verifiedChapters.forEach((vc) => storageService.saveChapter(vc));
+    // 4. Replace stored chapter list authoritatively (removes deleted chapters, obsolete topics, obsolete chunks)
+    storageService.replaceChaptersForDocument(currentBook.id, verifiedChapters);
+
+    // 5. Replace document chunks with newly rebuilt verified chunks
+    if (rebuiltChunks) {
+      storageService.replaceChunksForDocument(currentBook.id, rebuiltChunks);
+    }
     setChapters(verifiedChapters);
 
-    // 3. Mark document verified and confirmed by teacher ONLY after successful rebuild
+    // 6. Mark document verified and confirmed by teacher ONLY after successful rebuild
     const updatedDoc: DocumentItem = {
       ...currentBook,
       status: 'ready',
@@ -277,7 +394,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
     storageService.saveDocument(updatedDoc);
     setCurrentBook(updatedDoc);
 
-    // 4. Update paper weightage and slots with verified chapters
+    // 7. Update paper weightage and slots with verified chapters (synchronize saved exam paper)
     const updatedPaper = examPaperService.getOrCreatePaper(updatedDoc, verifiedChapters);
     setPaper(updatedPaper);
     setSolverDeficiency(null);

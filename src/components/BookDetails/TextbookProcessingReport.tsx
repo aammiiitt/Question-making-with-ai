@@ -300,12 +300,14 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
         }
       }
 
-      // Save rebuilt chunks and verified chapters
+      // 4. Replace stored chapter list authoritatively (removes deleted chapters, obsolete topics, obsolete chunks)
+      storageService.replaceChaptersForDocument(document.id, verifiedChapters);
+
+      // 5. Replace document chunks with newly rebuilt verified chunks
       storageService.replaceChunksForDocument(document.id, data.chunks);
-      verifiedChapters.forEach((vc) => storageService.saveChapter(vc));
       setEditedChapters(verifiedChapters);
 
-      // Only set teacher_confirmed after successful rebuild and validation!
+      // 6. Mark teacher_confirmed = true
       const updatedDoc: DocumentItem = {
         ...document,
         language: documentLanguage,
@@ -316,7 +318,8 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
       };
 
       storageService.saveDocument(updatedDoc);
-      // Requirement 6: Synchronize saved exam paper after chapter mapping change
+
+      // 7. Synchronize saved exam paper
       examPaperService.synchronizeSavedPaper(updatedDoc, verifiedChapters);
       setConfirmationSuccess(true);
 
