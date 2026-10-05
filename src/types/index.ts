@@ -109,6 +109,24 @@ export interface DocumentItem {
   image_only_pages_count?: number;
   ocr_processed_pages_count?: number;
   ocr_successful_pages_count?: number;
+  chapter_detection_diagnostics?: ChapterDetectionDiagnostics;
+}
+
+export interface ChapterHeadingCandidate {
+  chapterNumber: number;
+  physicalPage: number;
+  headingText: string;
+  nearbyTitle?: string;
+  confidence?: 'high' | 'medium' | 'provisional';
+}
+
+export interface ChapterDetectionDiagnostics {
+  totalPagesScanned: number;
+  candidateHeadingsCount: number;
+  first10CandidateHeadings: ChapterHeadingCandidate[];
+  tocCandidatePages: number[];
+  finalChaptersCount: number;
+  mappingSource: 'deterministic' | 'gemini' | 'hybrid' | 'provisional_fallback' | 'teacher_edit';
 }
 
 export interface Chapter {

@@ -7,6 +7,13 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const pdfParse: any = (pdfParseModule as any).default || pdfParseModule;
 import { GoogleGenAI, Type } from '@google/genai';
+import {
+  scanDocumentChapterHeadings,
+  discoverTocCandidatePages,
+  parseTocTitles,
+  buildDeterministicChapters,
+} from './src/utils/chapterHeadingScanner';
+import { ChapterHeadingCandidate, ChapterDetectionDiagnostics } from './src/types';
 
 dotenv.config();
 
@@ -261,12 +268,21 @@ app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Re
       const page = await pdfDoc.getPage(i);
       const textContent = await page.getTextContent();
       let pageText = '';
+      let lastY: number | null = null;
       for (const item of textContent.items) {
         if ('str' in item && typeof item.str === 'string') {
-          pageText += item.str + ' ';
+          const currentY = Array.isArray((item as any).transform) ? (item as any).transform[5] : null;
+          if (lastY !== null && currentY !== null && Math.abs(currentY - lastY) > 5) {
+            pageText += '\n' + item.str;
+          } else if ((item as any).hasEOL) {
+            pageText += '\n' + item.str;
+          } else {
+            pageText += (pageText.length > 0 && !pageText.endsWith('\n') ? ' ' : '') + item.str;
+          }
+          if (currentY !== null) lastY = currentY;
         }
       }
-      const cleanText = pageText.replace(/\s+/g, ' ').trim();
+      const cleanText = pageText.replace(/[ \t]+/g, ' ').replace(/\n\s+/g, '\n').trim();
       totalExtractedChars += cleanText.length;
       pageChunks.push({
         pageNumber: i,
@@ -415,115 +431,239 @@ Return ONLY the transcribed text of the page. Do not include markdown intro or c
 app.post('/api/detect-chapters', async (req: Request, res: Response) => {
   try {
     const { documentId, bookTitle, tocPages, allPages, pages, isDemo } = req.body;
-    if (!aiClient) {
-      return res.status(503).json({ error: 'Gemini not available.' });
-    }
 
-    // Requirement 1: Separate tocPages (for Gemini detection) and allPages (for chunk building)
-    const fullPages = Array.isArray(allPages) && allPages.length > 0
-      ? allPages
-      : (Array.isArray(pages) ? pages : []);
+    const fullPages: { pageNumber: number; text: string }[] =
+      Array.isArray(allPages) && allPages.length > 0
+        ? allPages
+        : Array.isArray(pages) && pages.length > 0
+        ? pages
+        : [];
 
-    const sampleTocPages = Array.isArray(tocPages) && tocPages.length > 0
-      ? tocPages
-      : fullPages.slice(0, 25);
+    const totalPhysicalPages = fullPages.length || 1;
 
-    const pagesText = sampleTocPages
-      .map((p: any) => `[Page ${p.pageNumber}]: ${p.text}`)
-      .join('\n\n')
-      .slice(0, 24000);
+    // Requirement 6: Document-wide deterministic scan across ALL physical pages
+    const candidateHeadings: ChapterHeadingCandidate[] = scanDocumentChapterHeadings(
+      fullPages,
+      bookTitle
+    );
 
-    const prompt = `Analyze the following Table of Contents / initial pages of the textbook titled "${bookTitle}".
-Extract the exact list of chapters, their estimated physical start and end page numbers, and core topics.
-Pages:\n${pagesText}`;
+    // Requirement 5: Scan first 40–60 physical pages for candidate TOC pages
+    const tocCandidatePageNumbers: number[] = discoverTocCandidatePages(fullPages, 60);
 
-    const response = await aiClient.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        temperature: 0.1,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            chapters: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  chapter_number: { type: Type.INTEGER },
-                  page_start: { type: Type.INTEGER },
-                  page_end: { type: Type.INTEGER },
-                  topics: { type: Type.ARRAY, items: { type: Type.STRING } },
+    const sampleTocPages = fullPages.filter((p) =>
+      tocCandidatePageNumbers.includes(p.pageNumber)
+    );
+
+    // Parse candidate titles directly from TOC text
+    const tocTitles = parseTocTitles(sampleTocPages, bookTitle);
+
+    let rawChapters: any[] = [];
+    let mappingSource: ChapterDetectionDiagnostics['mappingSource'] = 'deterministic';
+
+    // Requirement 7: Attempt AI reconciliation when Gemini client is available
+    if (aiClient) {
+      try {
+        const headingEvidenceText =
+          candidateHeadings.length > 0
+            ? candidateHeadings
+                .map(
+                  (c) =>
+                    `- Chapter ${c.chapterNumber}: starts on physical PDF page ${c.physicalPage} (Heading: "${c.headingText}"${
+                      c.nearbyTitle ? `, nearby title candidate: "${c.nearbyTitle}"` : ''
+                    })`
+                )
+                .join('\n')
+            : 'No direct "Chapter : X" headings detected in body text.';
+
+        const pagesText = sampleTocPages
+          .map((p: any) => `[Physical PDF Page ${p.pageNumber}]:\n${p.text}`)
+          .join('\n\n')
+          .slice(0, 24000);
+
+        const prompt = `Analyze the following Table of Contents pages and physical page heading evidence from the textbook "${bookTitle}".
+Extract the authentic list of chapters, their genuine physical start and end page numbers, and core topics.
+
+CRITICAL INSTRUCTIONS:
+1. Physical page_start MUST be the actual physical PDF page number (1 to ${totalPhysicalPages}) where the chapter starts in this PDF.
+2. Cross-reference the Table of Contents with the detected physical page starts below:
+${headingEvidenceText}
+3. If a chapter number has a detected physical page start above, use that exact physical page number.
+4. Do NOT use generic textbook headers (such as "Ganit Prava – Class VI" or book title) as a chapter title. Use the actual chapter name (e.g. "Perimeter and Area").
+5. Do NOT invent chapters that have no supporting evidence in the TOC or page headings.
+
+Table of Contents Pages:
+${pagesText}`;
+
+        const response = await aiClient.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            temperature: 0.1,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                chapters: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      title: { type: Type.STRING },
+                      chapter_number: { type: Type.INTEGER },
+                      page_start: { type: Type.INTEGER },
+                      page_end: { type: Type.INTEGER },
+                      topics: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    },
+                    required: ['title', 'chapter_number', 'page_start', 'page_end'],
+                  },
                 },
-                required: ['title', 'chapter_number', 'page_start', 'page_end'],
               },
+              required: ['chapters'],
             },
           },
-          required: ['chapters'],
-        },
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    const rawChapters = parsed.chapters || [];
-
-    // Requirement 2: Never invent chapters for real books
-    if (rawChapters.length === 0) {
-      if (!isDemo) {
-        return res.status(422).json({
-          success: false,
-          status: 'needs_review',
-          error: 'CHAPTER DETECTION NEEDS REVIEW: Could not reliably detect chapters from table of contents. Please map chapter page ranges manually.',
-          chapters: [],
-          topics: [],
-          chunks: [],
         });
+
+        const parsed = JSON.parse(response.text || '{}');
+        if (Array.isArray(parsed.chapters) && parsed.chapters.length > 0) {
+          rawChapters = parsed.chapters;
+          mappingSource = 'hybrid';
+        }
+      } catch (geminiErr) {
+        console.warn('Gemini chapter detection error, falling back to deterministic evidence:', geminiErr);
       }
     }
 
-    const chapters = rawChapters.map((rc: any, idx: number) => ({
-      id: `chap-${documentId}-${rc.chapter_number || idx + 1}`,
-      document_id: documentId,
-      title: rc.title,
-      chapter_number: rc.chapter_number || idx + 1,
-      page_start: rc.page_start || 1,
-      page_end: rc.page_end || rc.page_start + 15,
-      topics_count: rc.topics?.length || 3,
-      status: 'detected',
-    }));
+    // Requirements 7, 8, 9: If Gemini returned no chapters, use deterministic candidates
+    let finalChapters: any[] = [];
+
+    if (rawChapters.length > 0) {
+      // Reconcile Gemini chapters with candidate headings:
+      // Ensure page_start matches physical PDF page
+      const candidateMap = new Map<number, ChapterHeadingCandidate>();
+      for (const c of candidateHeadings) {
+        candidateMap.set(c.chapterNumber, c);
+      }
+
+      finalChapters = rawChapters.map((rc: any, idx: number) => {
+        const chapNum = rc.chapter_number || idx + 1;
+        const candidate = candidateMap.get(chapNum);
+
+        // Prefer deterministic physical page start if available
+        const physicalStart = candidate ? candidate.physicalPage : (rc.page_start || 1);
+
+        // Clean title if it contains generic book name
+        let cleanTitle = rc.title;
+        if (/ganit\s*prava|class\s*vi/i.test(cleanTitle) && candidate?.nearbyTitle) {
+          cleanTitle = candidate.nearbyTitle;
+        } else if (/ganit\s*prava|class\s*vi/i.test(cleanTitle) && tocTitles.has(chapNum)) {
+          cleanTitle = tocTitles.get(chapNum)!;
+        }
+
+        return {
+          id: `chap-${documentId}-${chapNum}`,
+          document_id: documentId,
+          title: cleanTitle,
+          chapter_number: chapNum,
+          page_start: physicalStart,
+          page_end: rc.page_end || physicalStart + 15,
+          topics: rc.topics,
+          status: 'detected',
+        };
+      });
+
+      // Merge any candidate headings that Gemini missed
+      for (const cand of candidateHeadings) {
+        if (!finalChapters.some((fc) => fc.chapter_number === cand.chapterNumber)) {
+          finalChapters.push({
+            id: `chap-${documentId}-${cand.chapterNumber}`,
+            document_id: documentId,
+            title:
+              cand.nearbyTitle ||
+              tocTitles.get(cand.chapterNumber) ||
+              `Chapter ${cand.chapterNumber} — Title needs teacher verification`,
+            chapter_number: cand.chapterNumber,
+            page_start: cand.physicalPage,
+            page_end: cand.physicalPage + 15,
+            topics: [],
+            status: cand.nearbyTitle || tocTitles.get(cand.chapterNumber) ? 'detected' : 'needs_review',
+          });
+        }
+      }
+
+      finalChapters.sort((a, b) => a.page_start - b.page_start);
+
+      // Reconcile page_end: next chapter start - 1
+      for (let i = 0; i < finalChapters.length; i++) {
+        const curr = finalChapters[i];
+        const next = finalChapters[i + 1];
+        curr.page_end = next ? Math.max(curr.page_start, next.page_start - 1) : totalPhysicalPages;
+        curr.topics_count = curr.topics?.length || 3;
+      }
+    } else if (candidateHeadings.length > 0) {
+      // Deterministic fallback with authentic physical pages
+      finalChapters = buildDeterministicChapters(
+        candidateHeadings,
+        totalPhysicalPages,
+        documentId,
+        tocTitles
+      );
+      mappingSource = candidateHeadings.some((c) => !c.nearbyTitle && !tocTitles.get(c.chapterNumber))
+        ? 'provisional_fallback'
+        : 'deterministic';
+    }
+
+    // Diagnostics object (Requirement 13)
+    const diagnostics: ChapterDetectionDiagnostics = {
+      totalPagesScanned: totalPhysicalPages,
+      candidateHeadingsCount: candidateHeadings.length,
+      first10CandidateHeadings: candidateHeadings.slice(0, 10),
+      tocCandidatePages: tocCandidatePageNumbers,
+      finalChaptersCount: finalChapters.length,
+      mappingSource,
+    };
+
+    if (finalChapters.length === 0) {
+      return res.json({
+        success: true,
+        status: 'needs_review',
+        error: 'Automatic chapter detection was unsuccessful. The extracted PDF text is still available. Retry automatic detection or manually verify chapter boundaries.',
+        chapters: [],
+        topics: [],
+        chunks: [],
+        diagnostics,
+      });
+    }
 
     const topics: any[] = [];
     const chunks: any[] = [];
 
-    // Requirement 1: Build knowledge chunks from ALL extracted physical pages (fullPages), NOT truncated pages!
-    rawChapters.forEach((rc: any, idx: number) => {
-      const chapId = `chap-${documentId}-${rc.chapter_number || idx + 1}`;
+    // Build topics and genuine knowledge chunks from fullPages
+    finalChapters.forEach((fc: any) => {
       const chapTopics =
-        rc.topics?.length > 0 ? rc.topics : [`${rc.title} Concepts`, `${rc.title} Practice`];
+        Array.isArray(fc.topics) && fc.topics.length > 0
+          ? fc.topics
+          : [`${fc.title} - Core Concepts`, `${fc.title} - Exercises & Applications`];
 
       chapTopics.forEach((tName: string, tIdx: number) => {
-        const topId = `top-${chapId}-${tIdx + 1}`;
+        const topId = `top-${fc.id}-${tIdx + 1}`;
         topics.push({
           id: topId,
-          chapter_id: chapId,
+          chapter_id: fc.id,
           document_id: documentId,
           title: tName,
         });
       });
 
-      // Gather ACTUAL text from physical pages within [page_start, page_end] across the ENTIRE document
+      // Gather ACTUAL text from physical pages within [page_start, page_end]
       const chapterPages = fullPages.filter(
         (p: any) =>
-          p.pageNumber >= rc.page_start &&
-          p.pageNumber <= rc.page_end &&
+          p.pageNumber >= fc.page_start &&
+          p.pageNumber <= fc.page_end &&
           p.text &&
           p.text.trim().length > 0
       );
 
       if (chapterPages.length > 0) {
-        // Group into real chunks of 2 physical pages
         const pageSize = 2;
         for (let cIdx = 0; cIdx < chapterPages.length; cIdx += pageSize) {
           const group = chapterPages.slice(cIdx, cIdx + pageSize);
@@ -534,9 +674,9 @@ Pages:\n${pagesText}`;
             .join('\n\n');
 
           chunks.push({
-            id: `chunk-${chapId}-${Math.floor(cIdx / pageSize) + 1}`,
+            id: `chunk-${fc.id}-${Math.floor(cIdx / pageSize) + 1}`,
             document_id: documentId,
-            chapter_id: chapId,
+            chapter_id: fc.id,
             page_start: startP,
             page_end: endP,
             text: actualText,
@@ -546,7 +686,14 @@ Pages:\n${pagesText}`;
       }
     });
 
-    return res.json({ success: true, status: 'detected', chapters, topics, chunks });
+    return res.json({
+      success: true,
+      status: 'detected',
+      chapters: finalChapters,
+      topics,
+      chunks,
+      diagnostics,
+    });
   } catch (error: any) {
     console.error('Error detecting chapters:', error);
     return res.status(500).json({ error: error.message });

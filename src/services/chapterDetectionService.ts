@@ -1,15 +1,22 @@
-import { Chapter, Topic, KnowledgeChunk } from '../types';
+import { Chapter, Topic, KnowledgeChunk, ChapterDetectionDiagnostics } from '../types';
+import {
+  scanDocumentChapterHeadings,
+  discoverTocCandidatePages,
+  parseTocTitles,
+  buildDeterministicChapters,
+} from '../utils/chapterHeadingScanner';
 
 export interface ChapterDetectionResult {
   chapters: Chapter[];
   topics: Topic[];
   chunks: KnowledgeChunk[];
+  diagnostics?: ChapterDetectionDiagnostics;
 }
 
 export class ChapterDetectionService {
   /**
    * Detects chapters and topics from extracted text or table of contents.
-   * Requirement 1: Sends tocPages for Gemini detection and allPages for building chunks.
+   * Requirement 1: Sends discovered tocPages and allPages for Gemini detection and chunk building.
    * Requirement 2: Never invents chapters for real uploaded textbooks.
    */
   public async detectChapters(
@@ -18,9 +25,14 @@ export class ChapterDetectionService {
     bookTitle: string,
     isDemo: boolean = false
   ): Promise<ChapterDetectionResult> {
+    const totalPages = extractedPages.length || 1;
+
+    // Requirement 5: Discover candidate TOC pages across first 40–60 pages
+    const tocCandidatePages = discoverTocCandidatePages(extractedPages, 60);
+    const tocPages = extractedPages.filter((p) => tocCandidatePages.includes(p.pageNumber));
+
     // 1. Send all extracted pages and TOC subset to /api/detect-chapters
     try {
-      const tocPages = extractedPages.slice(0, 25);
       const response = await fetch('/api/detect-chapters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -36,122 +48,85 @@ export class ChapterDetectionService {
       if (response.ok) {
         const data = await response.json();
         if (data.chapters && data.chapters.length > 0) {
-          return data;
+          return {
+            chapters: data.chapters,
+            topics: data.topics || [],
+            chunks: data.chunks || [],
+            diagnostics: data.diagnostics,
+          };
         }
-      } else {
-        const errJson = await response.json().catch(() => ({}));
-        if (errJson.status === 'needs_review') {
-          console.warn('Backend reported CHAPTER DETECTION NEEDS REVIEW');
-        }
+        // If server returned no chapters, fall through to deterministic client-side scan
       }
     } catch (e) {
-      console.warn('Chapter detection API unreachable, checking heuristic fallback:', e);
+      console.warn('Chapter detection API unreachable, checking deterministic scanner fallback:', e);
     }
 
-    // Heuristic chapter detection based strictly on regex matches in extracted text
-    const totalPages = extractedPages.length || 50;
-    const detectedChapters: Chapter[] = [];
-    const detectedTopics: Topic[] = [];
-    const detectedChunks: KnowledgeChunk[] = [];
+    // 2. Deterministic client-side scan across ALL physical pages
+    const candidates = scanDocumentChapterHeadings(extractedPages, bookTitle);
+    const tocTitles = parseTocTitles(tocPages, bookTitle);
 
-    // Analyze text for authentic Chapter headings: "Chapter 1", "অধ্যায় ১", "Unit 1", etc.
-    const chapterRegex = /(?:chapter|unit|অধ্যায়)\s*(\d+|[IVXLCDM]+)[:.\-\s]+([^\n\r.]+)/i;
+    let mappingSource: ChapterDetectionDiagnostics['mappingSource'] = 'deterministic';
 
-    let foundIndices: { page: number; title: string; num: number }[] = [];
-
-    extractedPages.forEach((p) => {
-      const match = p.text.match(chapterRegex);
-      if (match && match[2]) {
-        // Prevent duplicate detections of same chapter on consecutive pages
-        const cleanTitle = match[2].trim();
-        if (!foundIndices.some((f) => f.title.toLowerCase() === cleanTitle.toLowerCase())) {
-          foundIndices.push({
-            page: p.pageNumber,
-            title: cleanTitle,
-            num: foundIndices.length + 1,
-          });
-        }
-      }
-    });
-
-    // Requirement 2: NEVER invent chapters for real books
-    if (foundIndices.length === 0) {
+    if (candidates.length === 0) {
       if (!isDemo) {
-        // Return clear CHAPTER DETECTION NEEDS REVIEW status with empty chapters
-        // Teacher will manually enter or verify chapters
         return {
           chapters: [],
           topics: [],
           chunks: [],
+          diagnostics: {
+            totalPagesScanned: totalPages,
+            candidateHeadingsCount: 0,
+            first10CandidateHeadings: [],
+            tocCandidatePages,
+            finalChaptersCount: 0,
+            mappingSource: 'deterministic',
+          },
         };
-      }
-
-      // ONLY for isDemo=true: allow demo fallback
-      const segmentSize = Math.max(10, Math.floor(totalPages / 5));
-      const sampleNames = [
-        'Demo Chapter 1: Introduction and Principles',
-        'Demo Chapter 2: Quantities and Units',
-        'Demo Chapter 3: Energy and State Transformations',
-        'Demo Chapter 4: Dynamic Systems',
-        'Demo Chapter 5: Applications and Problem Solving',
-      ];
-
-      for (let i = 0; i < 5; i++) {
-        const start = i * segmentSize + 1;
-        const end = i === 4 ? totalPages : (i + 1) * segmentSize;
-        foundIndices.push({
-          page: start,
-          title: sampleNames[i],
-          num: i + 1,
-        });
       }
     }
 
-    for (let i = 0; i < foundIndices.length; i++) {
-      const current = foundIndices[i];
-      const next = foundIndices[i + 1];
-      const pageEnd = next ? next.page - 1 : totalPages;
-      const chapterId = `chap-${documentId}-${current.num}`;
+    const detectedChapters = buildDeterministicChapters(
+      candidates,
+      totalPages,
+      documentId,
+      tocTitles
+    );
 
-      detectedChapters.push({
-        id: chapterId,
-        document_id: documentId,
-        title: current.title,
-        chapter_number: current.num,
-        page_start: current.page,
-        page_end: Math.max(current.page, pageEnd),
-        topics_count: 3,
-        status: 'detected',
-      });
+    if (candidates.some((c) => !c.nearbyTitle && !tocTitles.get(c.chapterNumber))) {
+      mappingSource = 'provisional_fallback';
+    }
 
-      // Topics for each chapter
+    const detectedTopics: Topic[] = [];
+    const detectedChunks: KnowledgeChunk[] = [];
+
+    for (const chap of detectedChapters) {
       const topicsList = [
-        `${current.title} - Core Concepts`,
-        `${current.title} - Standard Worked Problems`,
-        `${current.title} - Exercises & Applications`,
+        `${chap.title} - Core Concepts`,
+        `${chap.title} - Standard Worked Problems`,
+        `${chap.title} - Exercises & Applications`,
       ];
 
       topicsList.forEach((topTitle, tIdx) => {
-        const topicId = `top-${chapterId}-${tIdx + 1}`;
+        const topicId = `top-${chap.id}-${tIdx + 1}`;
         detectedTopics.push({
           id: topicId,
-          chapter_id: chapterId,
+          chapter_id: chap.id,
           document_id: documentId,
           title: topTitle,
         });
       });
 
-      // Build real knowledge chunks from actual extracted physical pages across fullPages
+      // Build real knowledge chunks from physical pages
       const chapterPages = extractedPages.filter(
         (p) =>
-          p.pageNumber >= current.page &&
-          p.pageNumber <= pageEnd &&
+          p.pageNumber >= chap.page_start &&
+          p.pageNumber <= chap.page_end &&
           p.text &&
           p.text.trim().length > 0
       );
 
       if (chapterPages.length > 0) {
-        const chunkSize = 2; // 2 physical pages per chunk
+        const chunkSize = 2;
         for (let cIdx = 0; cIdx < chapterPages.length; cIdx += chunkSize) {
           const group = chapterPages.slice(cIdx, cIdx + chunkSize);
           const startP = group[0].pageNumber;
@@ -161,9 +136,9 @@ export class ChapterDetectionService {
             .join('\n\n');
 
           detectedChunks.push({
-            id: `chunk-${chapterId}-${Math.floor(cIdx / chunkSize) + 1}`,
+            id: `chunk-${chap.id}-${Math.floor(cIdx / chunkSize) + 1}`,
             document_id: documentId,
-            chapter_id: chapterId,
+            chapter_id: chap.id,
             page_start: startP,
             page_end: endP,
             text: actualText,
@@ -173,10 +148,20 @@ export class ChapterDetectionService {
       }
     }
 
+    const diagnostics: ChapterDetectionDiagnostics = {
+      totalPagesScanned: totalPages,
+      candidateHeadingsCount: candidates.length,
+      first10CandidateHeadings: candidates.slice(0, 10),
+      tocCandidatePages,
+      finalChaptersCount: detectedChapters.length,
+      mappingSource,
+    };
+
     return {
       chapters: detectedChapters,
       topics: detectedTopics,
       chunks: detectedChunks,
+      diagnostics,
     };
   }
 }

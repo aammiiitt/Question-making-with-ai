@@ -7,6 +7,7 @@ import {
   QuestionFeedback,
   User,
   PageCoverageRecord,
+  ChapterDetectionDiagnostics,
 } from '../types';
 import { classifyPageCoverage } from '../utils/pageClassification';
 import {
@@ -37,6 +38,7 @@ const STORAGE_KEYS = {
   CHUNKS: 'ai_qpm_chunks',
   QUESTIONS: 'ai_qpm_questions',
   FEEDBACK: 'ai_qpm_feedback',
+  CHAPTER_DIAGNOSTICS: 'ai_qpm_chapter_diagnostics',
 };
 
 class StorageService {
@@ -396,6 +398,19 @@ class StorageService {
     if (!this.isBrowser()) return [];
     const data = localStorage.getItem(STORAGE_KEYS.FEEDBACK);
     return data ? JSON.parse(data) : [];
+  }
+
+  public saveChapterDiagnostics(documentId: string, diag: ChapterDetectionDiagnostics): void {
+    if (!this.isBrowser()) return;
+    const key = `${STORAGE_KEYS.CHAPTER_DIAGNOSTICS}_${documentId}`;
+    localStorage.setItem(key, JSON.stringify(diag));
+  }
+
+  public getChapterDiagnostics(documentId: string): ChapterDetectionDiagnostics | null {
+    if (!this.isBrowser()) return null;
+    const key = `${STORAGE_KEYS.CHAPTER_DIAGNOSTICS}_${documentId}`;
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : null;
   }
 
   public resetAllToDemo(): void {
