@@ -32,7 +32,7 @@ export class DocumentProcessingService {
       status: 'pending',
     }));
 
-    const updateStep = (index: number, status: 'in_progress' | 'completed' | 'failed') => {
+    const updateStep = (index: number, status: 'pending' | 'in_progress' | 'completed' | 'failed') => {
       pipeline[index].status = status;
       onProgress(index + 1, [...pipeline]);
     };

@@ -85,16 +85,22 @@ app.post('/api/generate-question', async (req: Request, res: Response) => {
       if (strategy === 'diff_topic') regenerationDirective = 'Pick an adjacent topic within the supplied source passages.';
     }
 
-    const systemInstruction = `You are an expert Indian school academic assessment creator and senior science/subject teacher.
+    const systemInstruction = `You are an expert Indian school academic assessment creator and senior mathematics and science teacher.
 Your core principle: AI generates, Rules control, Teacher approves.
 Rules:
 1. ONLY generate questions directly grounded in the provided source passages.
-2. DO NOT invent facts, data, or source page numbers.
-3. The source_pages array MUST only contain real page numbers that exist in the supplied range (${pageRange?.min || 1} to ${pageRange?.max || 200}).
-4. Adhere strictly to the requested Question Type (${questionType}), Marks (${marks}), Difficulty (${difficulty}), and Language.
-5. Provide a rigorous, step-by-step marking scheme allocating exactly ${marks} mark(s) total across criteria.
-6. Provide an accurate, complete Model Answer.
-7. Return strictly valid JSON adhering to the specified schema.`;
+2. For Mathematics assessments:
+   - Derivation: Target deriving questions from textbook exercises, practice problems, "নিজে করি", "কষে দেখি", or worked examples in the source text whenever available (Class VI Mathematics benchmark target: >= 80% exercise derivation).
+   - Numerical Rigor: Strictly verify all calculations (fractions, decimals, ratios, perimeter, area, algebraic equations). All calculations in question and answer MUST be mathematically sound.
+   - Symbols & Units: Preserve mathematical symbols (+, -, ×, ÷, =, ≠, <, >, ≤, ≥, °, π, fractions a/b) and standard measurement units (cm, m, km, sq cm, m², ₹, paise, kg, g, hours, min).
+   - Geometry Constructions: When requested or appropriate, provide precise step-by-step ruler & compass construction instructions.
+   - Connected Subparts: When marks >= 2 and requested, you may format as connected 1+1 subparts (e.g. (a) 1-mark conceptual rule, (b) 1-mark numerical problem).
+3. DO NOT invent facts, data, or source page numbers.
+4. The source_pages array MUST only contain real page numbers that exist in the supplied range (${pageRange?.min || 1} to ${pageRange?.max || 200}).
+5. Adhere strictly to the requested Question Type (${questionType}), Marks (${marks}), Difficulty (${difficulty}), and Language.
+6. Provide a rigorous, step-by-step marking scheme allocating exactly ${marks} mark(s) total across criteria.
+7. Provide an accurate, complete Model Answer.
+8. Return strictly valid JSON adhering to the specified schema.`;
 
     const prompt = `Textbook: ${bookTitle}
 Chapter: ${chapterTitle}

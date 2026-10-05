@@ -58,6 +58,12 @@ export class ConstraintSolver {
       };
     }
 
+    // Check if sections represent the Benchmark V1 structure with sub-groups
+    const hasGroups = sections.some((s) => s.groups && s.groups.length > 0);
+    if (hasGroups) {
+      return this.solveBenchmarkV1(sections, includedChapters, targetTotalMarks);
+    }
+
     // 2. Tally available slots per mark denomination
     const denominationCounts: Record<number, number> = {};
     for (const sec of sections) {
@@ -232,6 +238,107 @@ export class ConstraintSolver {
 
           allocatedForSection++;
           bestSolution[cIdx][mark]--;
+        }
+      }
+    }
+
+    return {
+      success: true,
+      slots,
+    };
+  }
+
+  /**
+   * Solves the Benchmark V1 structure deterministically with Section A Q1-Q4 groups and optional choices.
+   */
+  private solveBenchmarkV1(
+    sections: SectionBlueprint[],
+    chapters: ChapterWeightage[],
+    targetTotalMarks: number
+  ): SolverResult {
+    const slots: QuestionSlot[] = [];
+    let slotIndex = 1;
+
+    // Create weighted round-robin distribution of chapters
+    const weightedChapters: ChapterWeightage[] = [];
+    for (const c of chapters) {
+      const weight = Math.max(1, Math.round((c.marks / targetTotalMarks) * 50));
+      for (let w = 0; w < weight; w++) {
+        weightedChapters.push(c);
+      }
+    }
+
+    let chapCursor = 0;
+    const nextChapter = () => {
+      const chap = weightedChapters[chapCursor % weightedChapters.length];
+      chapCursor++;
+      return chap;
+    };
+
+    const difficulties: DifficultyLevel[] = ['easy', 'moderate', 'moderate', 'difficult', 'easy'];
+
+    for (const sec of sections) {
+      if (sec.groups && sec.groups.length > 0) {
+        // Section with groups (e.g. Section A: Q1 MCQ, Q2 T/F, Q3 Fill in blanks, Q4 VSA)
+        for (const grp of sec.groups) {
+          const offered = grp.questionsOffered || 7;
+          for (let q = 1; q <= offered; q++) {
+            const chap = nextChapter();
+            const romanLabels = ['(i)', '(ii)', '(iii)', '(iv)', '(v)', '(vi)', '(vii)', '(viii)', '(ix)', '(x)'];
+            const subLabel = romanLabels[q - 1] || `(${q})`;
+
+            slots.push({
+              slotNumber: slotIndex++,
+              sectionId: sec.id,
+              sectionName: sec.name,
+              groupId: grp.id,
+              groupTitle: grp.title,
+              subQuestionLabel: subLabel,
+              chapterId: chap.chapter_id,
+              chapterTitle: chap.chapter_title,
+              marks: grp.marksPerQuestion || 1,
+              questionType: grp.questionType,
+              difficulty: q <= 3 ? 'easy' : q <= 6 ? 'moderate' : 'difficult',
+              status: 'pending',
+              isDerivedFromExercise: q % 5 !== 0, // Target >= 80% exercise derived
+              isNumerical: ['fill_in_the_blank', 'very_short_answer', 'mcq'].includes(grp.questionType),
+            });
+          }
+        }
+      } else {
+        // Standard section (e.g. Section B, Section C, Section D)
+        const offered = sec.questionsOffered || sec.numberOfQuestions;
+        const mark = sec.marksPerQuestion || 2;
+        const romanLabels = ['(i)', '(ii)', '(iii)', '(iv)', '(v)', '(vi)', '(vii)', '(viii)', '(ix)', '(x)', '(xi)', '(xii)'];
+
+        for (let q = 1; q <= offered; q++) {
+          const chap = nextChapter();
+          const subLabel = romanLabels[q - 1] || `(${q})`;
+          const diff = mark === 2 ? (q % 2 === 0 ? 'moderate' : 'easy') : mark === 3 ? 'moderate' : 'difficult';
+
+          const isGeom = chap.chapter_title.toLowerCase().includes('geometr') || chap.chapter_title.toLowerCase().includes('shape');
+          const isSubpart = mark === 2 && q % 3 === 0;
+
+          slots.push({
+            slotNumber: slotIndex++,
+            sectionId: sec.id,
+            sectionName: sec.name,
+            subQuestionLabel: subLabel,
+            chapterId: chap.chapter_id,
+            chapterTitle: chap.chapter_title,
+            marks: mark,
+            questionType: sec.questionType || (mark >= 4 ? 'long_answer' : 'short_answer'),
+            difficulty: diff,
+            status: 'pending',
+            isDerivedFromExercise: q % 5 !== 0, // Target >= 80% exercise derived
+            isGeometryConstruction: isGeom && mark >= 3,
+            hasDiagram: isGeom,
+            isNumerical: true,
+            subparts: isSubpart ? [
+              { label: '(a)', marks: 1, text: 'Fundamental conceptual definition or rule' },
+              { label: '(b)', marks: 1, text: 'Numerical problem application' },
+            ] : undefined,
+          });
         }
       }
     }

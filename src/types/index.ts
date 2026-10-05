@@ -278,20 +278,38 @@ export interface ChapterWeightage {
   page_end?: number;
 }
 
+export interface SectionGroupBlueprint {
+  id: string;
+  groupNumber: number;
+  title: string;
+  instruction: string;
+  questionType: QuestionType;
+  marksPerQuestion: number;
+  questionsOffered: number;
+  questionsToAttempt: number;
+  attemptedMarks: number;
+}
+
 export interface SectionBlueprint {
   id: string;
   name: string;
   description: string;
   marksPerQuestion: number;
-  numberOfQuestions: number;
-  totalSectionMarks: number;
+  numberOfQuestions: number; // Offered count
+  totalSectionMarks: number; // Attempted marks
   questionType: QuestionType;
+  questionsOffered?: number;
+  questionsToAttempt?: number;
+  groups?: SectionGroupBlueprint[];
 }
 
 export interface QuestionSlot {
   slotNumber: number;
   sectionId: string;
   sectionName: string;
+  groupId?: string;
+  groupTitle?: string;
+  subQuestionLabel?: string;
   chapterId: string;
   chapterTitle: string;
   marks: number;
@@ -300,6 +318,12 @@ export interface QuestionSlot {
   status: 'pending' | 'generating' | 'generated' | 'failed' | 'source_required';
   questionItem?: QuestionItem;
   errorReason?: string;
+  // Subject profile & benchmark flags
+  isDerivedFromExercise?: boolean;
+  hasDiagram?: boolean;
+  isGeometryConstruction?: boolean;
+  isNumerical?: boolean;
+  subparts?: { label: string; marks: number; text: string }[];
 }
 
 export interface ChapterHealthCheck {
@@ -326,6 +350,13 @@ export interface PaperHealth {
   allSourceGroundingPassed: boolean;
   isReady: boolean;
   healthIssues: string[];
+  // Assessment validation metrics
+  assessmentQualityScore?: number;
+  universalRulesPassedCount?: number;
+  universalRulesTotalCount?: number;
+  exerciseDerivationPercentage?: number;
+  numericalValidationPassed?: boolean;
+  assessmentReport?: any;
 }
 
 export interface ClassVIExamPaper {
@@ -339,6 +370,7 @@ export interface ClassVIExamPaper {
   documentId: string;
   bookTitle: string;
   weightageMode: WeightageMode;
+  blueprintPreset?: 'benchmark_v1' | 'compulsory_standard';
   chaptersWeightage: ChapterWeightage[];
   sections: SectionBlueprint[];
   slots: QuestionSlot[];

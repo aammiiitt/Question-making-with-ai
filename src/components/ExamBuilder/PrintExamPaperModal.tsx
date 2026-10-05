@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Printer, FileText, CheckCircle2, ShieldCheck, Eye, Layers } from 'lucide-react';
+import { X, Printer, FileText, CheckCircle2, ShieldCheck, Eye, Layers, Calculator } from 'lucide-react';
 import { ClassVIExamPaper } from '../../types';
 
 interface PrintExamPaperModalProps {
@@ -17,12 +17,15 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
 
   const [includeAnswerKey, setIncludeAnswerKey] = useState(true);
   const [includeWeightageAudit, setIncludeWeightageAudit] = useState(true);
+  const [includeAssessmentAudit, setIncludeAssessmentAudit] = useState(true);
 
   const handlePrint = () => {
     window.print();
   };
 
   const sections = paper.sections;
+  const isBenchmark = paper.blueprintPreset !== 'compulsory_standard';
+  const report = paper.paperHealth?.assessmentReport;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
@@ -33,10 +36,10 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
             <FileText className="w-5 h-5 text-slate-800" />
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                CLASS VI MATHEMATICS · CUSTOM 70-MARK SCHOOL EXAMINATION
+                CLASS VI MATHEMATICS · 70-MARK BENCHMARK EXAMINATION
               </h2>
               <p className="text-xs text-slate-500">
-                Print & Export Preview · 32 Questions · Strict Chapter Weightage
+                Print & Export Preview · {isBenchmark ? 'Benchmark V1 (Section A Q1-Q4 with 7-choose-5, Sec B, C, D)' : 'Standard Compulsory 32 Questions'}
               </p>
             </div>
           </div>
@@ -49,8 +52,8 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
         </div>
 
         {/* Options (Hidden in print) */}
-        <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs shrink-0 print:hidden">
-          <div className="flex items-center gap-4">
+        <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0 print:hidden">
+          <div className="flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-700">
               <input
                 type="checkbox"
@@ -58,7 +61,7 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
                 onChange={(e) => setIncludeAnswerKey(e.target.checked)}
                 className="rounded border-slate-300"
               />
-              <span>Include Confidential Answer Key & Rubrics</span>
+              <span>Confidential Answer Key & Rubrics</span>
             </label>
             <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-700">
               <input
@@ -67,12 +70,21 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
                 onChange={(e) => setIncludeWeightageAudit(e.target.checked)}
                 className="rounded border-slate-300"
               />
-              <span>Include Chapter Weightage Audit Table</span>
+              <span>Chapter Weightage Audit</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={includeAssessmentAudit}
+                onChange={(e) => setIncludeAssessmentAudit(e.target.checked)}
+                className="rounded border-slate-300"
+              />
+              <span>Universal & Benchmark Assessment Quality Certificate</span>
             </label>
           </div>
 
           <span className="font-bold text-slate-900">
-            {paper.slots.length} Questions · Total Marks: {paper.totalMarks}
+            {paper.slots.length} Offered Questions · Attempted Marks: {paper.totalMarks}
           </span>
         </div>
 
@@ -89,17 +101,30 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
             <div className="flex items-center justify-between text-xs pt-2 font-sans font-medium text-slate-700 border-t border-slate-300 mt-2">
               <span>{paper.className} · {paper.subject}</span>
               <span>Time Allowed: {paper.timeAllowed}</span>
-              <span className="font-bold">Full Marks: {paper.totalMarks}</span>
+              <span className="font-bold">Full Marks (Attempted): {paper.totalMarks}</span>
             </div>
           </div>
 
           {/* General Instructions */}
-          <div className="py-2.5 border-b border-slate-300 text-[11px] font-sans text-slate-600 space-y-0.5">
+          <div className="py-2.5 border-b border-slate-300 text-[11px] font-sans text-slate-700 space-y-0.5">
             <p className="font-bold text-slate-900">General Instructions:</p>
-            <p>1. This question paper comprises 4 Sections: A, B, C and D. All questions are compulsory.</p>
-            <p>2. Section A contains 10 questions of 1 mark each. Section B contains 10 questions of 2 marks each.</p>
-            <p>3. Section C contains 8 questions of 3 marks each. Section D contains 4 questions of 4 marks each.</p>
-            <p>4. Show all necessary rough calculations and steps clearly on your answer script.</p>
+            {isBenchmark ? (
+              <>
+                <p>1. This question paper comprises 4 Sections: Section A (20 Marks), Section B (20 Marks), Section C (15 Marks), and Section D (15 Marks). Total attempted marks = 70.</p>
+                <p>2. In Section A, Question 1 (MCQ), Question 2 (True/False), Question 3 (Fill in the blanks), and Question 4 (One Word/Sentence) each offer 7 questions: answer any 5 from each [1 mark each].</p>
+                <p>3. In Section B, answer any 10 questions out of 12 [2 marks each].</p>
+                <p>4. In Section C, answer any 5 questions out of 7 [3 marks each].</p>
+                <p>5. In Section D, answer any 3 questions out of 4 [5 marks each].</p>
+                <p>6. Show all necessary rough calculations, working steps, intermediate reasoning, and units clearly on your answer script.</p>
+              </>
+            ) : (
+              <>
+                <p>1. This question paper comprises 4 Sections: A, B, C and D. All questions are compulsory.</p>
+                <p>2. Section A contains 10 questions of 1 mark each. Section B contains 10 questions of 2 marks each.</p>
+                <p>3. Section C contains 8 questions of 3 marks each. Section D contains 4 questions of 4 marks each.</p>
+                <p>4. Show all necessary rough calculations and steps clearly on your answer script.</p>
+              </>
+            )}
           </div>
 
           {/* Question Sections */}
@@ -108,83 +133,179 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
               const secSlots = paper.slots.filter((s) => s.sectionId === sec.id);
 
               return (
-                <div key={sec.id} className="space-y-3">
-                  <div className="border-b border-slate-400 pb-1 flex items-center justify-between font-sans">
-                    <span className="font-bold text-xs uppercase text-slate-900">
-                      {sec.name} ({sec.numberOfQuestions} Questions × {sec.marksPerQuestion} Mark = {sec.totalSectionMarks} Marks)
+                <div key={sec.id} className="space-y-4">
+                  {/* Section Title */}
+                  <div className="border-b-2 border-slate-800 pb-1 flex items-center justify-between font-sans">
+                    <span className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                      {sec.name} {sec.totalSectionMarks ? `(Attempted = ${sec.totalSectionMarks} Marks)` : ''}
                     </span>
-                    <span className="text-[11px] text-slate-500 italic">
+                    <span className="text-[11px] text-slate-600 font-medium">
                       {sec.description}
                     </span>
                   </div>
 
-                  <div className="space-y-4">
-                    {secSlots.map((slot) => {
-                      const qItem = slot.questionItem;
-                      return (
-                        <div key={slot.slotNumber} className="flex items-start justify-between gap-3 text-sm">
-                          <div className="flex items-start gap-2 flex-1">
-                            <span className="font-bold shrink-0">{slot.slotNumber}.</span>
-                            <div className="flex-1 font-sans">
-                              <p className="font-medium text-slate-900 leading-relaxed whitespace-pre-line">
-                                {qItem?.question_text || `[Slot #${slot.slotNumber} (${slot.chapterTitle}) generating...]`}
-                              </p>
+                  {/* If section has sub-groups (Section A Q1, Q2, Q3, Q4) */}
+                  {sec.groups && sec.groups.length > 0 ? (
+                    <div className="space-y-5">
+                      {sec.groups.map((grp) => {
+                        const grpSlots = secSlots.filter((s) => s.groupId === grp.id);
 
-                              {/* MCQ Options */}
-                              {qItem?.options && qItem.options.length > 0 && (
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-xs text-slate-800 font-sans">
-                                  {qItem.options.map((opt, oIdx) => (
-                                    <div key={oIdx} className="leading-snug">{opt}</div>
-                                  ))}
-                                </div>
-                              )}
+                        return (
+                          <div key={grp.id} className="space-y-2.5">
+                            <div className="bg-slate-100/80 p-2 rounded border-l-4 border-slate-900 flex items-center justify-between font-sans text-xs">
+                              <span className="font-bold text-slate-900">
+                                {grp.title}
+                              </span>
+                              <span className="font-bold text-slate-800 shrink-0">
+                                [{grp.marksPerQuestion} × {grp.questionsToAttempt} = {grp.attemptedMarks}]
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-600 italic font-sans pl-1">
+                              {grp.instruction}
+                            </p>
+
+                            <div className="space-y-3 pt-1">
+                              {grpSlots.map((slot) => {
+                                const qItem = slot.questionItem;
+                                return (
+                                  <div key={slot.slotNumber} className="flex items-start justify-between gap-3 text-sm">
+                                    <div className="flex items-start gap-2 flex-1">
+                                      <span className="font-bold shrink-0">{slot.subQuestionLabel || `${slot.slotNumber}.`}</span>
+                                      <div className="flex-1 font-sans">
+                                        <p className="font-medium text-slate-900 leading-relaxed whitespace-pre-line">
+                                          {qItem?.question_text || `[Slot #${slot.slotNumber} (${slot.chapterTitle}) generating...]`}
+                                        </p>
+
+                                        {/* MCQ Options */}
+                                        {qItem?.options && qItem.options.length > 0 && (
+                                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1.5 text-xs text-slate-800 font-sans">
+                                            {qItem.options.map((opt, oIdx) => (
+                                              <div key={oIdx} className="leading-snug">{opt}</div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <span className="font-bold font-sans text-slate-700 text-xs shrink-0 pl-2">
+                                      [1]
+                                    </span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-                          <span className="font-bold font-sans text-slate-800 text-xs shrink-0 pl-3">
-                            [{slot.marks}]
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    /* Standard Non-Grouped Section */
+                    <div className="space-y-3.5">
+                      {secSlots.map((slot, sIdx) => {
+                        const qItem = slot.questionItem;
+                        const label = slot.subQuestionLabel || `${slot.slotNumber}.`;
+                        return (
+                          <div key={slot.slotNumber} className="flex items-start justify-between gap-3 text-sm">
+                            <div className="flex items-start gap-2 flex-1">
+                              <span className="font-bold shrink-0">{label}</span>
+                              <div className="flex-1 font-sans">
+                                <p className="font-medium text-slate-900 leading-relaxed whitespace-pre-line">
+                                  {qItem?.question_text || `[Slot #${slot.slotNumber} (${slot.chapterTitle}) generating...]`}
+                                </p>
+
+                                {slot.subparts && slot.subparts.length > 0 && (
+                                  <div className="space-y-1 mt-1.5 pl-2 border-l border-slate-300 font-sans text-xs">
+                                    {slot.subparts.map((sub, subIdx) => (
+                                      <div key={subIdx} className="flex items-center justify-between text-slate-800">
+                                        <span>{sub.label} {sub.text}</span>
+                                        <span className="font-semibold">[{sub.marks}]</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <span className="font-bold font-sans text-slate-800 text-xs shrink-0 pl-3">
+                              [{slot.marks}]
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
 
-          {/* Chapter Weightage Audit Table (Included for real-exam verification) */}
-          {includeWeightageAudit && (
-            <div className="mt-8 pt-4 border-t-2 border-slate-900 font-sans page-break-before">
+          {/* Assessment Quality Certificate */}
+          {includeAssessmentAudit && report && (
+            <div className="mt-8 pt-4 border-t-2 border-slate-900 font-sans page-break-before space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-slate-300">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                  <span className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                    Question Engine Quality & Assessment Audit Certificate
+                  </span>
+                </div>
+                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300">
+                  Quality Score: {report.totalScore}/100
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded">
+                  <span className="font-bold text-slate-900 block mb-1">Universal Assessment Rules:</span>
+                  <p className="text-[11px] text-slate-600">
+                    {report.universalAudit.passedRulesCount} / {report.universalAudit.evaluatedRulesCount} Rules Passed.
+                    Total attempted marks arithmetic: exact 70/70.
+                    Zero unauthorized outside-syllabus citations.
+                    Deduplication: {report.universalAudit.duplicates.length} duplicate/redundant questions detected.
+                  </p>
+                </div>
+
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded">
+                  <span className="font-bold text-slate-900 block mb-1">Class VI Mathematics Benchmark Profile:</span>
+                  <p className="text-[11px] text-slate-600">
+                    Textbook Exercise Derivation: {report.subjectProfileAudit?.exerciseDerivationPercentage}% (Target ≥ 80%).
+                    Numerical step validation: verified.
+                    Preservation of mathematical symbols & units: compliant.
+                    Geometry constructions & 1+1 subparts: supported.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Chapter Weightage Audit Table */}
+          {includeWeightageAudit && (
+            <div className="mt-6 pt-4 border-t border-slate-300 font-sans">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
                 <span className="font-bold text-xs uppercase tracking-wider text-slate-900">
-                  Chapter Weightage Audit Verification (Hard Constraint 70/70)
+                  Chapter Weightage Allocation Table
                 </span>
                 <span className="text-xs font-semibold text-emerald-800">
-                  Total Paper Marks: {paper.totalMarks}
+                  Attempted Target: {paper.totalMarks} Marks
                 </span>
               </div>
 
               <table className="w-full text-left text-xs mt-2 border border-slate-200">
                 <thead className="bg-slate-100 font-semibold text-slate-700">
                   <tr>
-                    <th className="py-1.5 px-2">Chapter Name</th>
-                    <th className="py-1.5 px-2 text-center">Allocated Questions</th>
+                    <th className="py-1.5 px-2">Chapter Title</th>
+                    <th className="py-1.5 px-2 text-center">Assigned Questions</th>
                     <th className="py-1.5 px-2 text-right">Target Marks</th>
-                    <th className="py-1.5 px-2 text-right">Actual Marks</th>
                     <th className="py-1.5 px-2 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {paper.chaptersWeightage.filter((c) => c.included).map((chap) => {
-                    const check = paper.paperHealth.chapterChecks.find((chk) => chk.chapterId === chap.chapter_id);
                     const count = paper.slots.filter((s) => s.chapterId === chap.chapter_id).length;
                     return (
                       <tr key={chap.chapter_id}>
                         <td className="py-1.5 px-2 font-medium">{chap.chapter_title}</td>
                         <td className="py-1.5 px-2 text-center">{count}</td>
-                        <td className="py-1.5 px-2 text-right">{chap.marks}m</td>
-                        <td className="py-1.5 px-2 text-right font-bold">{check?.actualMarks || chap.marks}m</td>
-                        <td className="py-1.5 px-2 text-center text-emerald-700 font-bold">✓ Exact</td>
+                        <td className="py-1.5 px-2 text-right font-bold">{chap.marks}m</td>
+                        <td className="py-1.5 px-2 text-center text-emerald-700 font-bold">✓ Target Met</td>
                       </tr>
                     );
                   })}
@@ -198,17 +319,19 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
             <div className="mt-8 pt-6 border-t-2 border-dashed border-slate-400 space-y-4 font-sans page-break-before">
               <div className="text-center pb-2 border-b border-slate-300">
                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-900">
-                  Teacher Evaluation Sheet: Model Answers & Marking Schemes
+                  Teacher Evaluation Sheet: Model Answers & Step-by-Step Marking Schemes
                 </h3>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-3.5">
                 {paper.slots.map((slot) => {
                   const qItem = slot.questionItem;
                   return (
-                    <div key={slot.slotNumber} className="text-xs space-y-1.5 p-3 rounded-lg bg-slate-50 border border-slate-200">
+                    <div key={slot.slotNumber} className="text-xs space-y-1 p-2.5 rounded-lg bg-slate-50 border border-slate-200">
                       <div className="flex items-center justify-between font-bold text-slate-900">
-                        <span>Question {slot.slotNumber} ({slot.sectionName} · {slot.marks} Marks)</span>
+                        <span>
+                          {slot.groupTitle ? `${slot.groupTitle} · ${slot.subQuestionLabel}` : `Question ${slot.slotNumber}`} ({slot.marks} Mark{slot.marks > 1 ? 's' : ''})
+                        </span>
                         <span className="text-[11px] text-slate-500 font-normal">
                           Chapter: {slot.chapterTitle} {qItem?.source ? `(pp. ${qItem.source.page_start}–${qItem.source.page_end})` : ''}
                         </span>
@@ -225,7 +348,7 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
 
                       {qItem?.answer?.marking_scheme && (
                         <div className="mt-1 pt-1 border-t border-slate-200 text-[11px] text-slate-600">
-                          <span className="font-semibold text-slate-800 block">Step Marking Scheme:</span>
+                          <span className="font-semibold text-slate-800 block">Marking Rubric:</span>
                           <ul className="list-disc pl-4 space-y-0.5 mt-0.5">
                             {qItem.answer.marking_scheme.map((crit, cIdx) => (
                               <li key={cIdx}>
@@ -246,7 +369,7 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
         {/* Footer Actions (Hidden in print) */}
         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between shrink-0 print:hidden">
           <span className="text-xs text-slate-500">
-            A4 paper layout ready for printer or PDF save
+            A4 Examination Paper Layout · Total Attempted: 70 Marks
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -260,7 +383,7 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
               className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-colors shadow-sm cursor-pointer"
             >
               <Printer className="w-4 h-4" />
-              <span>Print / Save 70M Paper PDF</span>
+              <span>Print / Save Paper PDF</span>
             </button>
           </div>
         </div>

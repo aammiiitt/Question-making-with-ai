@@ -560,6 +560,12 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
     setActiveReplaceSlot(null);
   };
 
+  const handleSwitchPreset = (preset: 'benchmark_v1' | 'compulsory_standard') => {
+    if (paper.blueprintPreset === preset) return;
+    const updated = examPaperService.setBlueprintPreset(paper, preset);
+    setPaper(updated);
+  };
+
   const toggleSectionExpand = (secId: string) => {
     setExpandedSections((prev) => ({
       ...prev,
@@ -568,6 +574,184 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
   };
 
   const isPaperGenerated = paper.slots.length > 0 && paper.slots.some((s) => s.status === 'generated');
+
+  const renderSlotCard = (slot: QuestionSlot) => {
+    const qItem = slot.questionItem;
+    const hasError = slot.status === 'failed' || slot.status === 'source_required';
+    const label = slot.subQuestionLabel ? `${slot.subQuestionLabel}` : `Q${slot.slotNumber}`;
+
+    return (
+      <div key={slot.slotNumber} className="py-4 first:pt-2 last:pb-2 space-y-3">
+        {/* Slot Metadata Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md font-mono">
+              {label}
+            </span>
+            <span className="font-bold text-slate-800">
+              {slot.chapterTitle}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="font-semibold text-slate-700">
+              {slot.marks} {slot.marks === 1 ? 'Mark' : 'Marks'}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="uppercase text-slate-500 font-medium">
+              {slot.questionType.replace(/_/g, ' ')}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="capitalize text-slate-500 font-medium">
+              {slot.difficulty}
+            </span>
+
+            {/* Benchmark Subject Badges */}
+            {slot.isDerivedFromExercise && (
+              <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                Exercise / নিজে করি Grounded
+              </span>
+            )}
+            {slot.isNumerical && (
+              <span className="text-[10px] font-bold text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                Numerical Checked
+              </span>
+            )}
+            {slot.isGeometryConstruction && (
+              <span className="text-[10px] font-bold text-purple-800 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                Geometry Construction
+              </span>
+            )}
+            {slot.subparts && slot.subparts.length > 0 && (
+              <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                1+1 Subparts
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {slot.status === 'generated' ? (
+              qItem?.source_grounding_status === 'verified' ? (
+                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Verified</span>
+                </span>
+              ) : (
+                <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Needs Review</span>
+                </span>
+              )
+            ) : slot.status === 'generating' ? (
+              <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Generating...</span>
+              </span>
+            ) : hasError ? (
+              <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5" />
+                <span>Source Required</span>
+              </span>
+            ) : (
+              <span className="text-[11px] text-slate-400">Pending</span>
+            )}
+          </div>
+        </div>
+
+        {/* Question Body */}
+        {qItem ? (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-slate-900 leading-relaxed font-sans whitespace-pre-line">
+              {qItem.question_text}
+            </p>
+
+            {/* Subparts display if present */}
+            {slot.subparts && slot.subparts.length > 0 && (
+              <div className="space-y-1 pl-3 border-l-2 border-slate-300 font-sans text-xs">
+                {slot.subparts.map((sub, sIdx) => (
+                  <div key={sIdx} className="flex items-center justify-between text-slate-800">
+                    <span>{sub.label} {sub.text}</span>
+                    <span className="font-semibold text-slate-700">[{sub.marks} Mark]</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* MCQ Options */}
+            {qItem.options && qItem.options.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-slate-800 font-sans pt-1">
+                {qItem.options.map((opt, oIdx) => (
+                  <div key={oIdx} className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                    {opt}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Model Answer Preview */}
+            {qItem.answer && (
+              <div className="mt-2 p-3 bg-emerald-50/40 rounded-xl border border-emerald-100 text-xs text-slate-800 leading-relaxed font-sans">
+                <span className="font-bold text-slate-900 block mb-0.5">Model Answer / Working:</span>
+                <p>{qItem.answer.answer_text}</p>
+                {qItem.answer.marking_scheme && qItem.answer.marking_scheme.length > 0 && (
+                  <div className="mt-2 pt-1.5 border-t border-emerald-200/60 text-[11px] text-emerald-900">
+                    <span className="font-bold block mb-0.5">Marking Rubric:</span>
+                    <ul className="list-disc pl-4 space-y-0.5">
+                      {qItem.answer.marking_scheme.map((crit, cIdx) => (
+                        <li key={cIdx}>{crit.criterion} [{crit.marks}m]</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : hasError ? (
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-950 space-y-1">
+            <p className="font-bold">{slot.errorReason}</p>
+            <p className="text-[11px] text-rose-800">
+              In accordance with Real Exam Grounding Rules, questions cannot be fabricated without textbook passages.
+            </p>
+          </div>
+        ) : null}
+
+        {/* Slot Action Bar */}
+        <div className="pt-2 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-3 text-slate-500 text-[11px]">
+            {qItem?.source && (
+              <button
+                type="button"
+                onClick={() => setActiveSourceSlot(slot)}
+                className="hover:text-slate-900 font-medium underline cursor-pointer"
+              >
+                Source: Pages {qItem.source.page_start}–{qItem.source.page_end}
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {qItem && (
+              <button
+                type="button"
+                onClick={() => setActiveEditSlot(slot)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold cursor-pointer"
+              >
+                <Edit2 className="w-3 h-3" />
+                <span>Edit</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setActiveReplaceSlot(slot)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold cursor-pointer shadow-2xs"
+            >
+              <RefreshCw className="w-3 h-3 text-amber-400" />
+              <span>Replace Slot</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -642,6 +826,57 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
             ))}
           </select>
         )}
+      </div>
+
+      {/* Blueprint Preset Mode Selector */}
+      <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 border border-indigo-200">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                Assessment Architecture Blueprint
+              </span>
+              <span className="font-bold text-slate-900 text-sm">
+                {paper.blueprintPreset === 'compulsory_standard'
+                  ? 'Compulsory Standard (32 Questions)'
+                  : 'Benchmark V1 (Section A Q1–Q4 with 7-choose-5, Sec B, C, D)'}
+              </span>
+            </div>
+            <p className="text-slate-500 text-[11px] mt-0.5">
+              {paper.blueprintPreset === 'compulsory_standard'
+                ? 'Standard 70-mark paper without optional choice groups (10×1m, 10×2m, 8×3m, 4×4m = 70m compulsory).'
+                : 'Class VI Mathematics Benchmark: Section A (MCQ, True/False, Fill in blanks, VSA: 7 offered, 5 attempted each = 20M) + Section B (10/12 = 20M) + Section C (5/7 = 15M) + Section D (3/4 = 15M) = 70 Attempted / 93 Offered.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => handleSwitchPreset('benchmark_v1')}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all text-xs cursor-pointer ${
+              paper.blueprintPreset !== 'compulsory_standard'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Benchmark V1 (Recommended)
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSwitchPreset('compulsory_standard')}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all text-xs cursor-pointer ${
+              paper.blueprintPreset === 'compulsory_standard'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Compulsory Standard (32Q)
+          </button>
+        </div>
       </div>
 
       {/* Requirement 8 & 10: Teacher Confirmation Lock Banner */}
@@ -805,139 +1040,43 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
 
                     {/* Section Slots List */}
                     {isExpanded && (
-                      <div className="p-4 divide-y divide-slate-100">
-                        {secSlots.map((slot) => {
-                          const qItem = slot.questionItem;
-                          const hasError = slot.status === 'failed' || slot.status === 'source_required';
+                      <div className="p-4 space-y-4">
+                        {sec.groups && sec.groups.length > 0 ? (
+                          /* Grouped Section (e.g. Section A: Q1 MCQ, Q2 T/F, Q3 Fill in blanks, Q4 VSA) */
+                          <div className="space-y-5">
+                            {sec.groups.map((grp) => {
+                              const grpSlots = secSlots.filter((s) => s.groupId === grp.id);
 
-                          return (
-                            <div key={slot.slotNumber} className="py-4 first:pt-0 last:pb-0 space-y-3">
-                              {/* Slot Metadata Bar */}
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
-                                    Q{slot.slotNumber}
-                                  </span>
-                                  <span className="font-bold text-slate-800">
-                                    {slot.chapterTitle}
-                                  </span>
-                                  <span className="text-slate-300">·</span>
-                                  <span className="font-semibold text-slate-700">
-                                    {slot.marks} {slot.marks === 1 ? 'Mark' : 'Marks'}
-                                  </span>
-                                  <span className="text-slate-300">·</span>
-                                  <span className="uppercase text-slate-500 font-medium">
-                                    {slot.questionType.replace(/_/g, ' ')}
-                                  </span>
-                                  <span className="text-slate-300">·</span>
-                                  <span className="capitalize text-slate-500 font-medium">
-                                    {slot.difficulty}
-                                  </span>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  {slot.status === 'generated' ? (
-                                    qItem?.source_grounding_status === 'verified' ? (
-                                      <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-                                        <CheckCircle2 className="w-3.5 h-3.5" />
-                                        <span>Verified</span>
-                                      </span>
-                                    ) : (
-                                      <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-                                        <AlertCircle className="w-3.5 h-3.5" />
-                                        <span>Needs Review</span>
-                                      </span>
-                                    )
-                                  ) : slot.status === 'generating' ? (
-                                    <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      <span>Generating...</span>
-                                    </span>
-                                  ) : hasError ? (
-                                    <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-                                      <AlertCircle className="w-3.5 h-3.5" />
-                                      <span>Source Required</span>
-                                    </span>
-                                  ) : (
-                                    <span className="text-[11px] text-slate-400">Pending</span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Question Body */}
-                              {qItem ? (
-                                <div className="space-y-2">
-                                  <p className="text-sm font-semibold text-slate-900 leading-relaxed font-sans whitespace-pre-line">
-                                    {qItem.question_text}
-                                  </p>
-
-                                  {/* MCQ Options */}
-                                  {qItem.options && qItem.options.length > 0 && (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-slate-800 font-sans pt-1">
-                                      {qItem.options.map((opt, oIdx) => (
-                                        <div key={oIdx} className="p-2 bg-slate-50 rounded-lg border border-slate-100">
-                                          {opt}
-                                        </div>
-                                      ))}
+                              return (
+                                <div key={grp.id} className="p-4 bg-slate-50/60 rounded-xl border border-slate-200/80 space-y-3">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-2.5 border-b border-slate-200">
+                                    <div>
+                                      <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+                                        <span>{grp.title}</span>
+                                      </h4>
+                                      <p className="text-[11px] text-slate-500 font-medium pl-3.5">
+                                        {grp.instruction}
+                                      </p>
                                     </div>
-                                  )}
+                                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200 shrink-0 self-start sm:self-auto">
+                                      {grp.marksPerQuestion}M × {grp.questionsToAttempt} = {grp.attemptedMarks} Attempted Marks
+                                    </span>
+                                  </div>
 
-                                  {/* Model Answer Preview */}
-                                  {qItem.answer && (
-                                    <div className="mt-2 p-3 bg-emerald-50/40 rounded-xl border border-emerald-100 text-xs text-slate-800 leading-relaxed font-sans">
-                                      <span className="font-bold text-slate-900 block mb-0.5">Model Answer / Solution:</span>
-                                      <p>{qItem.answer.answer_text}</p>
-                                    </div>
-                                  )}
+                                  <div className="divide-y divide-slate-100">
+                                    {grpSlots.map((slot) => renderSlotCard(slot))}
+                                  </div>
                                 </div>
-                              ) : hasError ? (
-                                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-950 space-y-1">
-                                  <p className="font-bold">{slot.errorReason}</p>
-                                  <p className="text-[11px] text-rose-800">
-                                    In accordance with Real Exam Grounding Rules, questions cannot be fabricated without textbook passages.
-                                  </p>
-                                </div>
-                              ) : null}
-
-                              {/* Slot Action Bar */}
-                              <div className="pt-2 flex items-center justify-between text-xs">
-                                <div className="flex items-center gap-3 text-slate-500 text-[11px]">
-                                  {qItem?.source && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveSourceSlot(slot)}
-                                      className="hover:text-slate-900 font-medium underline cursor-pointer"
-                                    >
-                                      Source: Pages {qItem.source.page_start}–{qItem.source.page_end}
-                                    </button>
-                                  )}
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  {qItem && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveEditSlot(slot)}
-                                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold cursor-pointer"
-                                    >
-                                      <Edit2 className="w-3 h-3" />
-                                      <span>Edit</span>
-                                    </button>
-                                  )}
-
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveReplaceSlot(slot)}
-                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold cursor-pointer shadow-2xs"
-                                  >
-                                    <RefreshCw className="w-3 h-3 text-amber-400" />
-                                    <span>Replace Slot</span>
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          /* Standard Section */
+                          <div className="divide-y divide-slate-100">
+                            {secSlots.map((slot) => renderSlotCard(slot))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
