@@ -29,7 +29,7 @@ export type UniversalRuleId =
   | 'difficulty_distribution'
   | 'output_language_integrity';
 
-export type RuleStatus = 'passed' | 'warning' | 'failed';
+export type RuleStatus = 'passed' | 'warning' | 'failed' | 'informational';
 
 export interface RuleEvaluationResult {
   ruleId: UniversalRuleId;
@@ -136,7 +136,14 @@ export interface SubjectRuleEvaluationResult {
   passed: boolean;
   score: number; // 0 to 100
   summary: string;
-  verificationStatus?: 'verified' | 'not_yet_verified' | 'failed';
+  verificationStatus?:
+    | 'verified'
+    | 'not_yet_verified'
+    | 'failed'
+    | 'structure_passed'
+    | 'structure_failed'
+    | 'informational'
+    | 'review_required';
   details?: string[];
   affectedSlotNumbers?: number[];
   recommendation?: string;
@@ -153,12 +160,16 @@ export interface SubjectProfileAudit {
   exerciseKnownCount: number;
   exerciseUnknownCount: number;
   exerciseDerivationStatus: 'compliant' | 'not_yet_verified' | 'failed';
-  numericalValidationStatus: 'verified' | 'not_yet_verified' | 'failed';
-  numericalValidationPassed: boolean;
+  numericalValidationStatus: 'structure_passed' | 'structure_failed' | 'not_yet_verified';
+  numericalStructureCheckPassed: boolean | null;
+  mathematicalCorrectnessStatus: 'not_yet_verified' | 'verified' | 'failed';
+  numericalValidationPassed?: boolean;
   structureCheckPassed: boolean;
   formulasAndUnitsPreserved: boolean | 'not_yet_verified';
-  geometryConstructionsStatus: 'compliant' | 'not_yet_verified' | 'none_detected';
-  connectedSubpartsStatus: 'compliant' | 'not_yet_verified' | 'failed';
+  geometryConstructionsStatus: 'informational' | 'compliant' | 'not_yet_verified' | 'none_detected';
+  geometryCount: number;
+  connectedSubpartsStatus: 'structure_passed' | 'structure_failed' | 'not_yet_verified';
+  connectedSubpartsSemanticStatus: 'review_required' | 'verified' | 'not_yet_verified';
   results: SubjectRuleEvaluationResult[];
   details: {
     exerciseSlots: number[];

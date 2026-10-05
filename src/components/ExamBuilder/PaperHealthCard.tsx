@@ -41,9 +41,12 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
   const isMarksExact = health.totalMarksActual === health.totalMarksExpected;
   const isQuestionsExact =
     health.totalQuestionsActual === health.totalQuestionsExpected && health.totalQuestionsExpected > 0;
+  const hasGeneratedQuestions = (health.totalQuestionsActual || 0) > 0;
   const isAuditNeedsReview = !health.isReady && isQuestionsExact;
 
-  const qualityScore = health.assessmentQualityScore ?? (health.isReady ? 100 : 85);
+  const qualityScore = hasGeneratedQuestions
+    ? health.assessmentQualityScore ?? null
+    : null;
   const exerciseStatus =
     health.exerciseDerivationStatus ||
     mathAudit?.exerciseDerivationStatus ||
@@ -53,7 +56,9 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
   const exerciseUnknown = health.exerciseUnknownCount ?? (mathAudit?.exerciseUnknownCount || 0);
   const rawExercisePct = health.exerciseDerivationPercentage ?? (mathAudit?.exerciseDerivationPercentage ?? null);
   const exercisePct = rawExercisePct ?? 0;
-  const rulesPassed = health.universalRulesPassedCount ?? (universalAudit?.passedRulesCount || 14);
+  const rulesPassed = hasGeneratedQuestions
+    ? health.universalRulesPassedCount ?? (universalAudit?.passedRulesCount || 0)
+    : null;
   const rulesTotal = health.universalRulesTotalCount ?? (universalAudit?.evaluatedRulesCount || 14);
 
   return (
@@ -85,14 +90,16 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
               <span className="text-slate-500 font-medium">Quality Score:</span>
               <span
                 className={`font-bold ${
-                  qualityScore >= 90
+                  qualityScore === null
+                    ? 'text-slate-500'
+                    : qualityScore >= 90
                     ? 'text-emerald-700'
                     : qualityScore >= 75
                     ? 'text-amber-700'
                     : 'text-rose-700'
                 }`}
               >
-                {qualityScore} / 100
+                {qualityScore !== null ? `${qualityScore} / 100` : 'Pending Generation'}
               </span>
             </div>
 
@@ -114,6 +121,11 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
                 <>
                   <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
                   <span>Review Required</span>
+                </>
+              ) : !hasGeneratedQuestions ? (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Pending Generation</span>
                 </>
               ) : (
                 <>
@@ -168,14 +180,17 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
             <span className="text-[10px] text-slate-500 block font-medium">Universal Rules</span>
             <div className="flex items-center justify-between mt-0.5">
               <span className="text-sm font-bold text-slate-900">
-                {rulesPassed} / {rulesTotal}
+                {hasGeneratedQuestions ? `${rulesPassed} / ${rulesTotal}` : 'Not Evaluated'}
               </span>
-              {rulesPassed === rulesTotal ? (
+              {hasGeneratedQuestions && rulesPassed === rulesTotal ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
               ) : (
                 <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
               )}
             </div>
+            <span className="text-[9px] font-bold uppercase tracking-wider block mt-0.5 text-slate-500">
+              {hasGeneratedQuestions ? `${rulesPassed} Passed` : 'NOT YET VERIFIED'}
+            </span>
           </div>
 
           <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
@@ -210,13 +225,20 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
           </div>
 
           <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
-            <span className="text-[10px] text-slate-500 block font-medium">Numerical Validation</span>
+            <span className="text-[10px] text-slate-500 block font-medium">Numerical Structure</span>
             <div className="flex items-center justify-between mt-0.5">
               <span className="text-xs font-bold text-slate-900 truncate">
-                {health.numericalValidationPassed ?? true ? '100% Verified' : 'Check Steps'}
+                {!hasGeneratedQuestions || health.numericalValidationStatus === 'not_yet_verified'
+                  ? 'NOT YET VERIFIED'
+                  : health.numericalValidationStatus === 'structure_passed'
+                  ? 'PASS'
+                  : 'FAIL'}
               </span>
               <Calculator className="w-4 h-4 text-indigo-600 shrink-0" />
             </div>
+            <span className="text-[9px] font-bold uppercase tracking-wider block mt-0.5 text-amber-700">
+              Correctness: NOT YET VERIFIED
+            </span>
           </div>
 
           <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-100 col-span-2 sm:col-span-1">
@@ -363,47 +385,71 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
 
               {/* Benchmark Rules List */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {mathAudit?.results.map((rule: SubjectRuleEvaluationResult) => (
-                  <div
-                    key={rule.ruleId}
-                    className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
-                      rule.status === 'passed'
-                        ? 'bg-emerald-50/30 border-emerald-200/70 text-slate-800'
-                        : 'bg-amber-50/50 border-amber-200 text-slate-900'
-                    }`}
-                  >
-                    <div className="shrink-0 mt-0.5">
-                      {rule.status === 'passed' ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 text-amber-600" />
-                      )}
-                    </div>
+                {mathAudit?.results.map((rule: SubjectRuleEvaluationResult) => {
+                  const isInformational = rule.status === 'informational';
+                  const isPassed = rule.status === 'passed';
+                  const isFailed = rule.status === 'failed';
 
-                    <div className="space-y-1 flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-900">{rule.name}</span>
-                        <span
-                          className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-                            rule.status === 'passed'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {rule.status === 'passed' ? 'Compliant' : 'Notice'}
-                        </span>
+                  return (
+                    <div
+                      key={rule.ruleId}
+                      className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                        isInformational
+                          ? 'bg-blue-50/40 border-blue-200/70 text-slate-800'
+                          : isPassed
+                          ? 'bg-emerald-50/30 border-emerald-200/70 text-slate-800'
+                          : isFailed
+                          ? 'bg-rose-50/50 border-rose-200 text-slate-900'
+                          : 'bg-amber-50/50 border-amber-200 text-slate-900'
+                      }`}
+                    >
+                      <div className="shrink-0 mt-0.5">
+                        {isInformational ? (
+                          <Compass className="w-4 h-4 text-blue-600" />
+                        ) : isPassed ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        ) : isFailed ? (
+                          <XCircle className="w-4 h-4 text-rose-600" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        )}
                       </div>
-                      <p className="text-[11px] text-slate-600 leading-snug">{rule.summary}</p>
-                      {rule.details && (
-                        <ul className="text-[10px] text-slate-500 list-disc pl-4 pt-0.5">
-                          {rule.details.map((d: string, i: number) => (
-                            <li key={i}>{d}</li>
-                          ))}
-                        </ul>
-                      )}
+
+                      <div className="space-y-1 flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-900">{rule.name}</span>
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                              isInformational
+                                ? 'bg-blue-100 text-blue-800'
+                                : isPassed
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : isFailed
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {isInformational
+                              ? 'Informational'
+                              : isPassed
+                              ? 'Compliant'
+                              : isFailed
+                              ? 'Failed'
+                              : 'Not Yet Verified'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 leading-snug">{rule.summary}</p>
+                        {rule.details && (
+                          <ul className="text-[10px] text-slate-500 list-disc pl-4 pt-0.5">
+                            {rule.details.map((d: string, i: number) => (
+                              <li key={i}>{d}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Visible Benchmark Metric Breakdown for Exercise Derivation */}
@@ -496,8 +542,12 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
                         <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded text-[10px] font-mono">
                           Slot #{dup.slotA} ↔ Slot #{dup.slotB}
                         </span>
-                        <span className="capitalize text-amber-700">
-                          ({dup.type.replace(/_/g, ' ')})
+                        <span className="text-[10px] font-bold text-amber-800 uppercase tracking-tight">
+                          {dup.type === 'exact'
+                            ? 'EXACT DUPLICATE — deterministic'
+                            : dup.type === 'semantic'
+                            ? 'POTENTIAL SEMANTIC DUPLICATE — heuristic'
+                            : 'POTENTIAL SAME-FACT DUPLICATE — heuristic'}
                         </span>
                       </span>
                       <span className="text-[10px] font-bold text-slate-500">

@@ -37,10 +37,17 @@ export class UniversalAssessmentEngine {
 
     // 6, 7, 8. Duplicate & Same Fact Detection
     const duplicateAudit = this.evaluateDuplicates(generatedSlots);
-    const rExactDuplicates = this.evaluateExactDuplicatesRule(duplicateAudit.exactMatches);
-    const rSemanticDuplicates = this.evaluateSemanticDuplicatesRule(duplicateAudit.semanticMatches);
+    const rExactDuplicates = this.evaluateExactDuplicatesRule(
+      duplicateAudit.exactMatches,
+      generatedSlots.length
+    );
+    const rSemanticDuplicates = this.evaluateSemanticDuplicatesRule(
+      duplicateAudit.semanticMatches,
+      generatedSlots.length
+    );
     const rSameFactDifferentFormat = this.evaluateSameFactDifferentFormatRule(
-      duplicateAudit.sameFactMatches
+      duplicateAudit.sameFactMatches,
+      generatedSlots.length
     );
 
     // 9. Marking Scheme Marks Equality
@@ -84,10 +91,11 @@ export class UniversalAssessmentEngine {
     const warningCount = results.filter((r) => r.status === 'warning').length;
     const failedCount = results.filter((r) => r.status === 'failed').length;
 
-    // Overall Score (0-100)
-    const overallScore = Math.round(
-      results.reduce((acc, r) => acc + r.score, 0) / Math.max(1, results.length)
-    );
+    // Overall Score (0-100) — zero if unrun / no generated questions
+    const hasGeneratedSlots = generatedSlots.length > 0;
+    const overallScore = hasGeneratedSlots
+      ? Math.round(results.reduce((acc, r) => acc + r.score, 0) / Math.max(1, results.length))
+      : 0;
 
     const allDuplicates: DuplicateMatch[] = [
       ...duplicateAudit.exactMatches,
@@ -96,7 +104,7 @@ export class UniversalAssessmentEngine {
     ];
 
     return {
-      passed: failedCount === 0 && passedCount >= 10,
+      passed: hasGeneratedSlots && failedCount === 0 && passedCount >= 10,
       overallScore,
       evaluatedRulesCount: results.length,
       passedRulesCount: passedCount,
@@ -125,8 +133,8 @@ export class UniversalAssessmentEngine {
         category: 'universal',
         status: 'warning',
         passed: false,
-        score: 50,
-        summary: 'No generated questions to evaluate yet.',
+        score: 0,
+        summary: 'Source validation: NOT YET VERIFIED (no generated questions).',
       };
     }
 
@@ -176,6 +184,18 @@ export class UniversalAssessmentEngine {
     slots: QuestionSlot[],
     generatedSlots: QuestionSlot[]
   ): RuleEvaluationResult {
+    if (generatedSlots.length === 0) {
+      return {
+        ruleId: 'no_outside_syllabus',
+        name: 'Syllabus Boundary Enforcement',
+        category: 'universal',
+        status: 'warning',
+        passed: false,
+        score: 0,
+        summary: 'Syllabus boundary enforcement: NOT YET VERIFIED (no generated questions).',
+      };
+    }
+
     const includedChapterIds = new Set(
       (paper.chaptersWeightage || []).filter((c) => c.included).map((c) => c.chapter_id)
     );
@@ -519,7 +539,7 @@ export class UniversalAssessmentEngine {
             questionTextB: textB,
             similarityScore: 1.0,
             type: 'exact',
-            reason: `Exact identical question text detected in Slot #${slotA.slotNumber} and Slot #${slotB.slotNumber}.`,
+            reason: `Exact identical question text detected in Slot #${slotA.slotNumber} and Slot #${slotB.slotNumber}. (EXACT DUPLICATE — deterministic)`,
           });
           continue;
         }
@@ -544,7 +564,7 @@ export class UniversalAssessmentEngine {
               questionTextB: textB,
               similarityScore: Number(jaccard.toFixed(2)),
               type: 'semantic',
-              reason: `High semantic similarity (${Math.round(jaccard * 100)}%) between Slot #${slotA.slotNumber} and Slot #${slotB.slotNumber}. Both test almost identical question structure.`,
+              reason: `High lexical token overlap (${Math.round(jaccard * 100)}%) between Slot #${slotA.slotNumber} and Slot #${slotB.slotNumber}. Flagged as POTENTIAL SEMANTIC DUPLICATE — heuristic for teacher review.`,
             });
             continue;
           }
@@ -564,7 +584,7 @@ export class UniversalAssessmentEngine {
                 questionTextB: textB,
                 similarityScore: Number(jaccard.toFixed(2)),
                 type: 'same_fact_different_format',
-                reason: `Same underlying mathematical fact (${commonFacts.join(', ')}) asked in different question formats (${slotA.questionType.toUpperCase()} in #${slotA.slotNumber} vs ${slotB.questionType.toUpperCase()} in #${slotB.slotNumber}).`,
+                reason: `Common mathematical facts (${commonFacts.join(', ')}) shared across question formats (${slotA.questionType.toUpperCase()} in #${slotA.slotNumber} vs ${slotB.questionType.toUpperCase()} in #${slotB.slotNumber}). Flagged as POTENTIAL SAME-FACT DUPLICATE — heuristic.`,
               });
             }
           }
@@ -575,38 +595,66 @@ export class UniversalAssessmentEngine {
     return { exactMatches, semanticMatches, sameFactMatches };
   }
 
-  private evaluateExactDuplicatesRule(exactMatches: DuplicateMatch[]): RuleEvaluationResult {
+  private evaluateExactDuplicatesRule(
+    exactMatches: DuplicateMatch[],
+    generatedCount: number
+  ): RuleEvaluationResult {
+    if (generatedCount === 0) {
+      return {
+        ruleId: 'exact_duplicate_detection',
+        name: 'Exact Duplicate Question Detection (Deterministic)',
+        category: 'universal',
+        status: 'warning',
+        passed: false,
+        score: 0,
+        summary: 'Exact duplicate detection: NOT YET VERIFIED (no generated questions).',
+      };
+    }
     const passed = exactMatches.length === 0;
     const affected = Array.from(new Set(exactMatches.flatMap((m) => [m.slotA, m.slotB])));
     return {
       ruleId: 'exact_duplicate_detection',
-      name: 'Exact Duplicate Question Detection',
+      name: 'Exact Duplicate Question Detection (Deterministic)',
       category: 'universal',
       status: passed ? 'passed' : 'failed',
       passed,
       score: passed ? 100 : Math.max(0, 100 - exactMatches.length * 30),
       summary: passed
-        ? 'No exact duplicate questions detected in the paper.'
-        : `${exactMatches.length} exact duplicate question pair(s) detected.`,
+        ? 'No exact duplicate questions detected in the paper (Deterministic).'
+        : `${exactMatches.length} exact duplicate question pair(s) detected (EXACT DUPLICATE — deterministic).`,
       details: exactMatches.map((m) => m.reason),
       affectedSlotNumbers: affected,
       recommendation: passed ? undefined : 'Replace or regenerate duplicate slots to ensure question variety.',
     };
   }
 
-  private evaluateSemanticDuplicatesRule(semanticMatches: DuplicateMatch[]): RuleEvaluationResult {
+  private evaluateSemanticDuplicatesRule(
+    semanticMatches: DuplicateMatch[],
+    generatedCount: number
+  ): RuleEvaluationResult {
+    if (generatedCount === 0) {
+      return {
+        ruleId: 'semantic_duplicate_detection',
+        name: 'Potential Semantic Duplicate Detection (Heuristic)',
+        category: 'universal',
+        status: 'warning',
+        passed: false,
+        score: 0,
+        summary: 'Potential semantic duplicate detection: NOT YET VERIFIED (no generated questions).',
+      };
+    }
     const passed = semanticMatches.length === 0;
     const affected = Array.from(new Set(semanticMatches.flatMap((m) => [m.slotA, m.slotB])));
     return {
       ruleId: 'semantic_duplicate_detection',
-      name: 'Semantic Duplicate Question Detection',
+      name: 'Potential Semantic Duplicate Detection (Heuristic)',
       category: 'universal',
       status: passed ? 'passed' : 'warning',
       passed,
       score: passed ? 100 : Math.max(50, 100 - semanticMatches.length * 15),
       summary: passed
-        ? 'No semantic duplicates or highly similar questions detected.'
-        : `${semanticMatches.length} semantically similar question pair(s) detected.`,
+        ? 'No potential semantic duplicates flagged by heuristic token similarity.'
+        : `${semanticMatches.length} question pair(s) flagged as POTENTIAL SEMANTIC DUPLICATE — heuristic.`,
       details: semanticMatches.map((m) => m.reason),
       affectedSlotNumbers: affected,
       recommendation: passed
@@ -615,19 +663,33 @@ export class UniversalAssessmentEngine {
     };
   }
 
-  private evaluateSameFactDifferentFormatRule(sameFactMatches: DuplicateMatch[]): RuleEvaluationResult {
+  private evaluateSameFactDifferentFormatRule(
+    sameFactMatches: DuplicateMatch[],
+    generatedCount: number
+  ): RuleEvaluationResult {
+    if (generatedCount === 0) {
+      return {
+        ruleId: 'same_fact_different_format',
+        name: 'Potential Cross-Format Duplicate Detection (Heuristic)',
+        category: 'universal',
+        status: 'warning',
+        passed: false,
+        score: 0,
+        summary: 'Potential cross-format duplicate detection: NOT YET VERIFIED (no generated questions).',
+      };
+    }
     const passed = sameFactMatches.length === 0;
     const affected = Array.from(new Set(sameFactMatches.flatMap((m) => [m.slotA, m.slotB])));
     return {
       ruleId: 'same_fact_different_format',
-      name: 'Cross-Format Repetitive Fact Detection',
+      name: 'Potential Cross-Format Duplicate Detection (Heuristic)',
       category: 'universal',
       status: passed ? 'passed' : 'warning',
       passed,
       score: passed ? 100 : Math.max(60, 100 - sameFactMatches.length * 12),
       summary: passed
-        ? 'No identical facts repeated across different question formats.'
-        : `${sameFactMatches.length} fact(s) tested redundantly across different formats.`,
+        ? 'No cross-format duplicate facts flagged by heuristic.'
+        : `${sameFactMatches.length} question pair(s) flagged as POTENTIAL SAME-FACT DUPLICATE — heuristic.`,
       details: sameFactMatches.map((m) => m.reason),
       affectedSlotNumbers: affected,
       recommendation: passed
@@ -645,10 +707,10 @@ export class UniversalAssessmentEngine {
         ruleId: 'marking_scheme_marks_equality',
         name: 'Marking Scheme Marks Strict Equality',
         category: 'universal',
-        status: 'passed',
-        passed: true,
-        score: 100,
-        summary: 'Marking scheme rule ready for verification.',
+        status: 'warning',
+        passed: false,
+        score: 0,
+        summary: 'Marking scheme validation: NOT YET VERIFIED (no generated questions).',
       };
     }
 
@@ -710,10 +772,10 @@ export class UniversalAssessmentEngine {
         ruleId: 'answer_validation',
         name: 'Model Answer Validation',
         category: 'universal',
-        status: 'passed',
-        passed: true,
-        score: 100,
-        summary: 'Answer validation active.',
+        status: 'warning',
+        passed: false,
+        score: 0,
+        summary: 'Model answer validation: NOT YET VERIFIED (no generated questions).',
       };
     }
 
@@ -769,10 +831,10 @@ export class UniversalAssessmentEngine {
         ruleId: 'source_pages_traceable',
         name: 'Source Pages Traceability',
         category: 'universal',
-        status: 'passed',
-        passed: true,
-        score: 100,
-        summary: 'Source page citation engine ready.',
+        status: 'warning',
+        passed: false,
+        score: 0,
+        summary: 'Source pages traceability: NOT YET VERIFIED (no generated questions).',
       };
     }
 
@@ -816,18 +878,30 @@ export class UniversalAssessmentEngine {
     slots: QuestionSlot[],
     generatedSlots: QuestionSlot[]
   ): RuleEvaluationResult {
+    if (generatedSlots.length === 0) {
+      return {
+        ruleId: 'teacher_approval_workflow',
+        name: 'Teacher Review and Approval Workflow',
+        category: 'universal',
+        status: 'warning',
+        passed: false,
+        score: 0,
+        summary: 'Teacher Review Status: NOT YET VERIFIED (no generated questions).',
+      };
+    }
+
     const approvedCount = generatedSlots.filter(
       (s) => s.questionItem?.status === 'approved' || s.questionItem?.status === 'edited'
     ).length;
 
     const pendingReviewCount = generatedSlots.length - approvedCount;
-    const score = generatedSlots.length > 0 ? Math.round((approvedCount / generatedSlots.length) * 100) : 100;
+    const score = Math.round((approvedCount / generatedSlots.length) * 100);
 
     return {
       ruleId: 'teacher_approval_workflow',
       name: 'Teacher Review and Approval Workflow',
       category: 'universal',
-      status: pendingReviewCount === 0 && generatedSlots.length > 0 ? 'passed' : 'warning',
+      status: pendingReviewCount === 0 ? 'passed' : 'warning',
       passed: true, // Teacher review remains available
       score,
       summary: `Teacher Review Status: ${approvedCount} approved / edited, ${pendingReviewCount} pending final teacher sign-off.`,
@@ -842,7 +916,18 @@ export class UniversalAssessmentEngine {
   // RULE 13: Difficulty Distribution
   // ----------------------------------------------------
   public evaluateDifficultyDistribution(generatedSlots: QuestionSlot[]): DifficultyAudit {
-    const total = Math.max(1, generatedSlots.length);
+    if (generatedSlots.length === 0) {
+      return {
+        easyPercentage: 0,
+        moderatePercentage: 0,
+        difficultPercentage: 0,
+        targetProfile: { easy: 30, moderate: 50, difficult: 20 },
+        passed: false,
+        notes: 'Difficulty Distribution: NOT YET VERIFIED (no generated questions).',
+      };
+    }
+
+    const total = generatedSlots.length;
     let easyCount = 0;
     let modCount = 0;
     let diffCount = 0;
@@ -874,16 +959,19 @@ export class UniversalAssessmentEngine {
   }
 
   private evaluateDifficultyRule(audit: DifficultyAudit): RuleEvaluationResult {
+    const isUnverified = audit.notes.includes('NOT YET VERIFIED');
     return {
       ruleId: 'difficulty_distribution',
       name: 'Difficulty Distribution Measurement',
       category: 'universal',
       status: audit.passed ? 'passed' : 'warning',
       passed: audit.passed,
-      score: audit.passed ? 100 : 75,
+      score: audit.passed ? 100 : isUnverified ? 0 : 75,
       summary: audit.notes,
       recommendation: audit.passed
         ? undefined
+        : isUnverified
+        ? 'Generate questions to measure Bloom/difficulty levels.'
         : 'Adjust difficulty levels to balance easy, moderate, and higher-order thinking problems.',
     };
   }
@@ -892,6 +980,19 @@ export class UniversalAssessmentEngine {
   // RULE 14: Output Language Integrity
   // ----------------------------------------------------
   public evaluateLanguageIntegrity(generatedSlots: QuestionSlot[]): LanguageIntegrityAudit {
+    if (generatedSlots.length === 0) {
+      return {
+        expectedLanguage: 'bn',
+        detectedLanguage: 'Not yet generated',
+        bengaliScriptIntegrity: false,
+        noCorruptedUnicode: true,
+        mathematicalLocalizationEquivalence: 'not_yet_verified',
+        passed: false,
+        flaggedSlots: [],
+        notes: 'Output Language & Localization Equivalence: NOT YET VERIFIED (no generated questions).',
+      };
+    }
+
     let bengaliScriptIntegrity = true;
     let noCorruptedUnicode = true;
     const flaggedSlots: number[] = [];
@@ -919,31 +1020,36 @@ export class UniversalAssessmentEngine {
       }
     }
 
-    const passed = bengaliScriptIntegrity && noCorruptedUnicode && flaggedSlots.length === 0;
+    const scriptPassed = bengaliScriptIntegrity && noCorruptedUnicode && flaggedSlots.length === 0;
 
     return {
-      expectedLanguage: generatedSlots[0]?.questionItem?.language || 'en',
+      expectedLanguage: generatedSlots[0]?.questionItem?.language || 'bn',
       detectedLanguage: bengaliScriptIntegrity ? 'Authentic Unicode' : 'Integrity Checked',
       bengaliScriptIntegrity,
       noCorruptedUnicode,
-      mathematicalLocalizationEquivalence: 'verified',
-      passed,
+      mathematicalLocalizationEquivalence: 'not_yet_verified',
+      passed: scriptPassed,
       flaggedSlots,
-      notes: passed
-        ? 'Output language script integrity verified. Zero garbled glyphs or encoding corruption.'
-        : `Language integrity warnings detected in Slot(s): #${flaggedSlots.join(', #')}.`,
+      notes: scriptPassed
+        ? 'Bengali Unicode Integrity: PASS. Mathematical Localization Equivalence: NOT YET VERIFIED (requires teacher review).'
+        : `Bengali Unicode Integrity: FAIL (Encoding errors or missing Bengali script in Slot(s): #${flaggedSlots.join(', #')}). Mathematical Localization Equivalence: NOT YET VERIFIED.`,
     };
   }
 
   private evaluateLanguageRule(audit: LanguageIntegrityAudit): RuleEvaluationResult {
+    const isUnverified = audit.notes.includes('NOT YET VERIFIED (no generated questions)');
     return {
       ruleId: 'output_language_integrity',
       name: 'Output Language and Script Integrity',
       category: 'universal',
-      status: audit.passed ? 'passed' : 'failed',
+      status: audit.passed ? 'passed' : isUnverified ? 'warning' : 'failed',
       passed: audit.passed,
-      score: audit.passed ? 100 : 50,
+      score: audit.passed ? 100 : isUnverified ? 0 : 50,
       summary: audit.notes,
+      details: [
+        `Bengali Unicode Integrity: ${audit.bengaliScriptIntegrity && audit.noCorruptedUnicode ? 'PASS' : 'FAIL'}`,
+        'Mathematical Localization Equivalence: NOT YET VERIFIED',
+      ],
       affectedSlotNumbers: audit.flaggedSlots,
     };
   }

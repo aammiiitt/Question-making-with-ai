@@ -323,7 +323,9 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
       exerciseDerivationStatus = 'not_yet_verified';
       exerciseRuleStatus = 'warning';
       exerciseRulePassed = false;
-      exerciseSummary = `NOT YET VERIFIED: Insufficient classified source evidence (${knownSourceCount} known source passages). Benchmark requires question generation grounded in verified textbook passages.`;
+      exerciseSummary = generatedSlots.length === 0
+        ? 'Exercise Derivation: NOT YET VERIFIED (no generated questions).'
+        : `NOT YET VERIFIED: Insufficient classified source evidence (${knownSourceCount} known source passages). Target: >= ${this.exerciseDerivationTargetPercentage}%.`;
     } else if (exercisePercentage >= this.exerciseDerivationTargetPercentage) {
       exerciseDerivationStatus = 'compliant';
       exerciseRuleStatus = 'passed';
@@ -336,8 +338,6 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
       exerciseSummary = `FAILED / NEEDS IMPROVEMENT: ${exercisePercentage}% of verified sources derived from textbook exercises (${exerciseCount}/${knownSourceCount} known sources). Target: >= ${this.exerciseDerivationTargetPercentage}%.`;
     }
 
-    const numericalValidationPassed = invalidNumericalsCount === 0;
-
     // Rule 1: Target >= 80% Exercise Derivation
     const rExerciseDerivation: SubjectRuleEvaluationResult = {
       ruleId: 'math_exercise_derivation_target',
@@ -348,7 +348,7 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
       verificationStatus: exerciseDerivationStatus === 'compliant' ? 'verified' : exerciseDerivationStatus,
       score: hasSufficientEvidence
         ? Math.min(100, Math.round((exercisePercentage / this.exerciseDerivationTargetPercentage) * 100))
-        : 75,
+        : 0,
       summary: exerciseSummary,
       details: [
         `Exercise-derived: ${exerciseCount}`,
@@ -364,18 +364,53 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
         : 'Generate examination slots to verify source classifications against authentic textbook pages.',
     };
 
-    // Rule 2: Mandatory Numerical Validation
-    const rNumericalValidation: SubjectRuleEvaluationResult = {
+    // Point 1: Numerical Structure Check vs Mathematical Correctness
+    // Presence of numbers/formulas is ONLY a structural check, NOT independent proof of arithmetic correctness.
+    const isNumericalEmpty = generatedSlots.length === 0;
+    const numericalStructurePassed = !isNumericalEmpty && invalidNumericalsCount === 0;
+
+    // Rule 2A: Numerical Structure Check (PASS / FAIL)
+    const rNumericalStructure: SubjectRuleEvaluationResult = {
       ruleId: 'math_numerical_validation',
-      name: 'Mandatory Numerical & Arithmetic Validation',
+      name: 'Numerical Structure Check',
       category: 'subject_profile',
-      status: numericalValidationPassed ? 'passed' : 'failed',
-      passed: numericalValidationPassed,
-      score: numericalValidationPassed ? 100 : Math.max(0, 100 - invalidNumericalsCount * 25),
-      summary: numericalValidationPassed
-        ? `All ${numericalSlots.length} numerical questions have verified arithmetic calculations and step-by-step solutions.`
-        : `${invalidNumericalsCount} numerical question(s) have unverified working steps or missing numbers.`,
-      affectedSlotNumbers: numericalValidationPassed ? undefined : numericalSlots.slice(0, 3),
+      status: isNumericalEmpty ? 'warning' : numericalStructurePassed ? 'passed' : 'failed',
+      passed: numericalStructurePassed,
+      verificationStatus: isNumericalEmpty
+        ? 'not_yet_verified'
+        : numericalStructurePassed
+        ? 'structure_passed'
+        : 'structure_failed',
+      score: isNumericalEmpty ? 0 : numericalStructurePassed ? 100 : Math.max(0, 100 - invalidNumericalsCount * 25),
+      summary: isNumericalEmpty
+        ? 'Numerical Structure Check: NOT YET VERIFIED (no generated questions).'
+        : `Numerical Structure Check: ${numericalStructurePassed ? 'PASS' : 'FAIL'} (${numericalSlots.length} numerical question(s) structurally evaluated).`,
+      details: isNumericalEmpty
+        ? ['Awaiting question generation to evaluate numerical structure.']
+        : numericalStructurePassed
+        ? ['Mathematical expressions, model answers, and step-by-step marking rubrics are structurally present where expected.']
+        : [`${invalidNumericalsCount} numerical question(s) have unverified working steps or missing numbers in rubric.`],
+      affectedSlotNumbers: isNumericalEmpty || numericalStructurePassed ? undefined : numericalSlots.slice(0, 3),
+      recommendation: numericalStructurePassed
+        ? undefined
+        : 'Ensure multi-mark numerical questions include intermediate working steps and point allocations.',
+    };
+
+    // Rule 2B: Mathematical Correctness (NOT YET VERIFIED)
+    const rMathematicalCorrectness: SubjectRuleEvaluationResult = {
+      ruleId: 'math_correctness_verification',
+      name: 'Mathematical Correctness',
+      category: 'subject_profile',
+      status: 'warning',
+      passed: false,
+      verificationStatus: 'not_yet_verified',
+      score: 0,
+      summary: 'Mathematical Correctness: NOT YET VERIFIED',
+      details: [
+        'Independent arithmetic verification is NOT YET IMPLEMENTED.',
+        'Presence of numbers and formulas confirms structural formatting only; independent calculation proof is pending teacher review.',
+      ],
+      recommendation: 'Teacher manual verification of arithmetic calculations is recommended.',
     };
 
     // Rule 3: Mathematical Formulas, Symbols & Units Preservation
@@ -383,64 +418,168 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
       ruleId: 'math_formulas_symbols_units',
       name: 'Formulas, Mathematical Symbols and Units Preservation',
       category: 'subject_profile',
-      status: formulasUnitsPreserved ? 'passed' : 'warning',
-      passed: formulasUnitsPreserved,
-      score: formulasUnitsPreserved ? 100 : 85,
-      summary: formulasUnitsPreserved
-        ? 'Standard mathematical symbols (+, -, ×, ÷, =, °, %, etc.) and units (cm, m, m², ₹, kg) are fully preserved in questions and answer keys.'
-        : 'Some numerical questions should specify explicit measurement units in the model answer.',
+      status: isNumericalEmpty ? 'warning' : formulasUnitsPreserved ? 'passed' : 'warning',
+      passed: isNumericalEmpty ? false : formulasUnitsPreserved,
+      verificationStatus: isNumericalEmpty ? 'not_yet_verified' : formulasUnitsPreserved ? 'structure_passed' : 'structure_failed',
+      score: isNumericalEmpty ? 0 : formulasUnitsPreserved ? 100 : 85,
+      summary: isNumericalEmpty
+        ? 'Formulas and Units Preservation: NOT YET VERIFIED (no generated questions).'
+        : formulasUnitsPreserved
+        ? 'Formulas and Units Preservation: PASS'
+        : 'Formulas and Units Preservation: NOTICE (some numerical questions should specify explicit measurement units).',
+      details: [
+        'Checks preservation of standard mathematical symbols (+, -, ×, ÷, =, °, %, etc.) and units (cm, m, m², ₹, kg).',
+      ],
     };
 
-    // Rule 4: Geometry Constructions & Diagrams Support
+    // Point 3: Geometry Status — INFORMATIONAL ONLY
+    // Do not award a quality PASS simply for feature availability.
     const rGeometryAndDiagrams: SubjectRuleEvaluationResult = {
       ruleId: 'math_geometry_constructions',
-      name: 'Geometry Constructions & Visual Problem Support',
+      name: 'Geometry & Diagram Content Detection',
       category: 'subject_profile',
-      status: 'passed',
-      passed: true,
-      score: 100,
-      summary: `Geometry construction and visual diagram support active. ${geometrySlots.length} geometrical question(s) configured.`,
+      status: 'informational',
+      passed: false,
+      verificationStatus: 'informational',
+      score: 0,
+      summary: `Geometry / diagram questions detected: ${geometrySlots.length}`,
+      details: [
+        `Found ${geometrySlots.length} question(s) involving geometry constructions, angles, shapes, or diagrams.`,
+        'INFORMATIONAL: Subject benchmark does not mandate a fixed quota; detection tracks presence only.',
+      ],
     };
 
-    // Rule 5: Connected 1+1 Subparts Capability
+    // Point 4: Connected 1+1 Subparts Check
+    // Benchmark requires EXACTLY TWO Section-B offered slots with requiresConnectedSubparts = true.
+    const subpartConfiguredSlots = (paper.slots || []).filter(
+      (s) => (s.sectionId === 'sec-b' || s.sectionName?.includes('Section B')) && s.requiresConnectedSubparts
+    );
+    const configuredCount = subpartConfiguredSlots.length;
+    const isConfigCountValid = configuredCount === 2;
+
+    const subpartSlotNumbers = subpartConfiguredSlots.map((s) => s.slotNumber);
+    const generatedTargetSlots = generatedSlots.filter((s) => subpartSlotNumbers.includes(s.slotNumber));
+
+    let subpartStructurePassed = isConfigCountValid;
+    let generatedSubpartValidCount = 0;
+    const subpartDetails: string[] = [
+      `Section B configured 1+1 subpart slots: ${configuredCount} (Benchmark target: exactly 2). Configuration: ${isConfigCountValid ? 'PASS' : 'FAIL'}.`,
+    ];
+
+    if (generatedTargetSlots.length === 0) {
+      subpartDetails.push('Connected 1+1 structure: NOT YET VERIFIED (slots not yet generated).');
+      subpartDetails.push('Semantic connection: NOT YET VERIFIED.');
+    } else {
+      for (const slot of generatedTargetSlots) {
+        const q = slot.questionItem;
+        if (!q) continue;
+
+        const is2Marks = slot.marks === 2 && q.marks === 2;
+        const hasTwoSubparts =
+          (slot.subparts && slot.subparts.length === 2) ||
+          (/\(a\)[\s\S]*\(b\)/i.test(q.question_text)) ||
+          (/\(i\)[\s\S]*\(ii\)/i.test(q.question_text));
+
+        const ms = q.answer?.marking_scheme;
+        const hasTwo1MarkCriteria =
+          Array.isArray(ms) &&
+          ms.length === 2 &&
+          Number(ms[0].marks) === 1 &&
+          Number(ms[1].marks) === 1;
+
+        if (is2Marks && hasTwoSubparts && hasTwo1MarkCriteria) {
+          generatedSubpartValidCount++;
+          subpartDetails.push(`Slot #${slot.slotNumber}: 2 marks, 2 subparts, 1+1 marking rubric structurally verified.`);
+        } else {
+          subpartStructurePassed = false;
+          subpartDetails.push(
+            `Slot #${slot.slotNumber}: Structural discrepancy (2 marks: ${is2Marks ? 'yes' : 'no'}, 2 subparts: ${hasTwoSubparts ? 'yes' : 'no'}, 1+1 rubric criteria: ${hasTwo1MarkCriteria ? 'yes' : 'no'}).`
+          );
+        }
+      }
+
+      subpartDetails.push('Semantic connection: TEACHER / AI REVIEW REQUIRED');
+    }
+
+    const isSubpartDone = generatedTargetSlots.length > 0 && generatedTargetSlots.length === configuredCount && isConfigCountValid;
+    const subpartOverallPassed = isSubpartDone && subpartStructurePassed && generatedSubpartValidCount === 2;
+
     const rConnectedSubparts: SubjectRuleEvaluationResult = {
       ruleId: 'math_connected_subparts',
-      name: 'Connected 1+1 Subparts Capability',
+      name: 'Connected 1+1 Subparts (Section B)',
       category: 'subject_profile',
-      status: 'passed',
-      passed: true,
-      score: 100,
-      summary: `Connected 1+1 subpart capability supported for multi-concept testing. ${subpartSlots.length} subpart question(s) detected.`,
+      status: !isSubpartDone
+        ? 'warning'
+        : subpartOverallPassed
+        ? 'passed'
+        : 'failed',
+      passed: subpartOverallPassed,
+      verificationStatus: !isSubpartDone
+        ? 'not_yet_verified'
+        : subpartOverallPassed
+        ? 'structure_passed'
+        : 'structure_failed',
+      score: !isSubpartDone ? 0 : subpartOverallPassed ? 90 : 30,
+      summary: !isSubpartDone
+        ? (generatedSlots.length === 0
+            ? 'Connected 1+1 structure: NOT YET VERIFIED (no generated questions). Semantic connection: NOT YET VERIFIED'
+            : `Connected 1+1 structure: NOT YET VERIFIED (${generatedTargetSlots.length}/${configuredCount} generated). Semantic connection: NOT YET VERIFIED`)
+        : subpartOverallPassed
+        ? 'Connected 1+1 structure: PASS · Semantic connection: TEACHER / AI REVIEW REQUIRED'
+        : 'Connected 1+1 structure: FAIL · Semantic connection: TEACHER / AI REVIEW REQUIRED',
+      details: subpartDetails,
+      recommendation: 'Verify that both 1-mark subparts in Section B belong to the same connected topic.',
     };
 
     const results = [
       rExerciseDerivation,
-      rNumericalValidation,
+      rNumericalStructure,
+      rMathematicalCorrectness,
       rFormulasAndUnits,
       rGeometryAndDiagrams,
       rConnectedSubparts,
     ];
 
-    const overallScore = Math.round(results.reduce((acc, r) => acc + r.score, 0) / results.length);
+    const nonInfoResults = results.filter((r) => r.status !== 'informational');
+    const overallScore = Math.round(
+      nonInfoResults.reduce((acc, r) => acc + r.score, 0) / Math.max(1, nonInfoResults.length)
+    );
     const passed = results.every((r) => r.status !== 'failed');
 
     return {
       profileId: this.id,
       profileName: this.name,
-      passed: passed && (exerciseDerivationStatus === 'compliant' || exerciseDerivationStatus === 'not_yet_verified'),
-      overallScore,
+      passed:
+        generatedSlots.length > 0 &&
+        passed &&
+        exerciseDerivationStatus === 'compliant' &&
+        numericalStructurePassed &&
+        subpartOverallPassed,
+      overallScore: generatedSlots.length === 0 ? 0 : overallScore,
       exerciseDerivationPercentage: hasSufficientEvidence ? exercisePercentage : null,
       exerciseDerivationTarget: this.exerciseDerivationTargetPercentage,
       exerciseCount,
       exerciseKnownCount: knownSourceCount,
       exerciseUnknownCount: unknownCount,
       exerciseDerivationStatus,
-      numericalValidationStatus: numericalValidationPassed ? 'verified' : 'failed',
-      numericalValidationPassed,
-      structureCheckPassed: true,
-      formulasAndUnitsPreserved: formulasUnitsPreserved,
-      geometryConstructionsStatus: geometrySlots.length > 0 ? 'compliant' : 'none_detected',
-      connectedSubpartsStatus: 'compliant',
+      numericalValidationStatus: isNumericalEmpty
+        ? 'not_yet_verified'
+        : numericalStructurePassed
+        ? 'structure_passed'
+        : 'structure_failed',
+      numericalStructureCheckPassed: isNumericalEmpty ? null : numericalStructurePassed,
+      mathematicalCorrectnessStatus: 'not_yet_verified',
+      numericalValidationPassed: isNumericalEmpty ? undefined : numericalStructurePassed,
+      structureCheckPassed: isConfigCountValid,
+      formulasAndUnitsPreserved: isNumericalEmpty ? 'not_yet_verified' : formulasUnitsPreserved,
+      geometryConstructionsStatus: 'informational',
+      geometryCount: geometrySlots.length,
+      connectedSubpartsStatus: !isSubpartDone
+        ? 'not_yet_verified'
+        : subpartOverallPassed
+        ? 'structure_passed'
+        : 'structure_failed',
+      connectedSubpartsSemanticStatus: generatedSlots.length === 0 ? 'not_yet_verified' : 'review_required',
       results,
       details: {
         exerciseSlots,

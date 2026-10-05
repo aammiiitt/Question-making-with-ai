@@ -701,11 +701,21 @@ export class ExamPaperService {
     }
 
     // Run Universal Rules Engine + Class VI Mathematics Profile Evaluation
-    let assessmentQualityScore = 100;
-    let universalRulesPassedCount = 14;
-    let universalRulesTotalCount = 14;
-    let exerciseDerivationPercentage = 85;
-    let numericalValidationPassed = true;
+    let assessmentQualityScore: number | undefined = undefined;
+    let universalRulesPassedCount: number | undefined = undefined;
+    let universalRulesTotalCount: number | undefined = undefined;
+    let exerciseDerivationPercentage: number | undefined = undefined;
+    let numericalValidationPassed: boolean | undefined = undefined;
+    let numericalValidationStatus: 'structure_passed' | 'structure_failed' | 'not_yet_verified' = 'not_yet_verified';
+    let mathematicalCorrectnessStatus: 'not_yet_verified' | 'verified' | 'failed' = 'not_yet_verified';
+    let geometryConstructionsStatus: 'informational' | 'compliant' | 'not_yet_verified' | 'none_detected' = 'informational';
+    let geometryCount = 0;
+    let connectedSubpartsStatus: 'structure_passed' | 'structure_failed' | 'not_yet_verified' = 'not_yet_verified';
+    let connectedSubpartsSemanticStatus: 'review_required' | 'verified' | 'not_yet_verified' = 'not_yet_verified';
+    let exerciseCount = 0;
+    let exerciseKnownCount = 0;
+    let exerciseUnknownCount = 0;
+    let exerciseDerivationStatus: 'compliant' | 'not_yet_verified' | 'failed' = 'not_yet_verified';
     let assessmentReport: any = null;
 
     try {
@@ -731,19 +741,33 @@ export class ExamPaperService {
       };
 
       assessmentReport = assessmentService.generateFullReport(syntheticPaper);
-      assessmentQualityScore = assessmentReport.totalScore;
-      universalRulesPassedCount = assessmentReport.universalAudit.passedRulesCount;
+      const hasGeneratedQuestions = actualQuestions > 0;
+      assessmentQualityScore = hasGeneratedQuestions ? assessmentReport.totalScore : undefined;
+      universalRulesPassedCount = hasGeneratedQuestions ? assessmentReport.universalAudit.passedRulesCount : undefined;
       universalRulesTotalCount = assessmentReport.universalAudit.evaluatedRulesCount;
-      exerciseDerivationPercentage =
-        assessmentReport.subjectProfileAudit?.exerciseDerivationPercentage ?? null;
-      numericalValidationPassed =
-        assessmentReport.subjectProfileAudit?.numericalValidationPassed ?? true;
+      exerciseDerivationPercentage = hasGeneratedQuestions
+        ? (assessmentReport.subjectProfileAudit?.exerciseDerivationPercentage ?? undefined)
+        : undefined;
+      numericalValidationPassed = hasGeneratedQuestions
+        ? assessmentReport.subjectProfileAudit?.numericalStructureCheckPassed ?? false
+        : undefined;
+      numericalValidationStatus = hasGeneratedQuestions
+        ? (assessmentReport.subjectProfileAudit?.numericalValidationStatus ?? 'not_yet_verified')
+        : 'not_yet_verified';
+      mathematicalCorrectnessStatus = 'not_yet_verified';
+      geometryConstructionsStatus = 'informational';
+      geometryCount = assessmentReport.subjectProfileAudit?.geometryCount ?? 0;
+      connectedSubpartsStatus = hasGeneratedQuestions
+        ? (assessmentReport.subjectProfileAudit?.connectedSubpartsStatus ?? 'not_yet_verified')
+        : 'not_yet_verified';
+      connectedSubpartsSemanticStatus = hasGeneratedQuestions ? 'review_required' : 'not_yet_verified';
 
-      const exerciseCount = assessmentReport.subjectProfileAudit?.exerciseCount ?? 0;
-      const exerciseKnownCount = assessmentReport.subjectProfileAudit?.exerciseKnownCount ?? 0;
-      const exerciseUnknownCount = assessmentReport.subjectProfileAudit?.exerciseUnknownCount ?? 0;
-      const exerciseDerivationStatus =
-        assessmentReport.subjectProfileAudit?.exerciseDerivationStatus ?? 'not_yet_verified';
+      exerciseCount = assessmentReport.subjectProfileAudit?.exerciseCount ?? 0;
+      exerciseKnownCount = assessmentReport.subjectProfileAudit?.exerciseKnownCount ?? 0;
+      exerciseUnknownCount = assessmentReport.subjectProfileAudit?.exerciseUnknownCount ?? 0;
+      exerciseDerivationStatus = hasGeneratedQuestions
+        ? (assessmentReport.subjectProfileAudit?.exerciseDerivationStatus ?? 'not_yet_verified')
+        : 'not_yet_verified';
 
       // Add any critical errors to health issues
       if (assessmentReport.criticalErrors && assessmentReport.criticalErrors.length > 0) {
@@ -794,12 +818,18 @@ export class ExamPaperService {
       universalRulesPassedCount,
       universalRulesTotalCount,
       exerciseDerivationPercentage: exerciseDerivationPercentage ?? undefined,
-      exerciseCount: assessmentReport?.subjectProfileAudit?.exerciseCount ?? 0,
-      exerciseKnownCount: assessmentReport?.subjectProfileAudit?.exerciseKnownCount ?? 0,
-      exerciseUnknownCount: assessmentReport?.subjectProfileAudit?.exerciseUnknownCount ?? 0,
-      exerciseDerivationStatus:
-        assessmentReport?.subjectProfileAudit?.exerciseDerivationStatus ?? 'not_yet_verified',
-      numericalValidationPassed,
+      exerciseCount: exerciseCount,
+      exerciseKnownCount: exerciseKnownCount,
+      exerciseUnknownCount: exerciseUnknownCount,
+      exerciseDerivationStatus: exerciseDerivationStatus,
+      numericalValidationStatus: numericalValidationStatus,
+      numericalStructureCheckPassed: assessmentReport?.subjectProfileAudit?.numericalStructureCheckPassed ?? (actualQuestions > 0 ? false : null),
+      mathematicalCorrectnessStatus: mathematicalCorrectnessStatus,
+      numericalValidationPassed: numericalValidationPassed,
+      geometryConstructionsStatus: geometryConstructionsStatus,
+      geometryCount: geometryCount,
+      connectedSubpartsStatus: connectedSubpartsStatus,
+      connectedSubpartsSemanticStatus: connectedSubpartsSemanticStatus,
       assessmentReport,
     };
   }

@@ -56,9 +56,14 @@ export class AssessmentService {
       }
     }
 
-    const totalScore = Math.round(
-      (universalAudit.overallScore * 0.65) + (subjectProfileAudit.overallScore * 0.35)
+    const hasGeneratedQuestions = (paper.slots || []).some(
+      (s) => s.status === 'generated' && s.questionItem
     );
+    const totalScore = hasGeneratedQuestions
+      ? Math.round(
+          (universalAudit.overallScore * 0.65) + (subjectProfileAudit.overallScore * 0.35)
+        )
+      : 0;
 
     const isReady =
       universalAudit.passed &&

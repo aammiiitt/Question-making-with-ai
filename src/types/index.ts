@@ -390,8 +390,14 @@ export interface PaperHealth {
   exerciseKnownCount?: number;
   exerciseUnknownCount?: number;
   exerciseDerivationStatus?: 'compliant' | 'not_yet_verified' | 'failed';
-  numericalValidationStatus?: 'verified' | 'not_yet_verified' | 'failed';
+  numericalValidationStatus?: 'structure_passed' | 'structure_failed' | 'not_yet_verified';
+  numericalStructureCheckPassed?: boolean | null;
+  mathematicalCorrectnessStatus?: 'not_yet_verified' | 'verified' | 'failed';
   numericalValidationPassed?: boolean;
+  geometryConstructionsStatus?: 'informational' | 'compliant' | 'not_yet_verified' | 'none_detected';
+  geometryCount?: number;
+  connectedSubpartsStatus?: 'structure_passed' | 'structure_failed' | 'not_yet_verified';
+  connectedSubpartsSemanticStatus?: 'review_required' | 'verified' | 'not_yet_verified';
   assessmentReport?: any;
 }
 
