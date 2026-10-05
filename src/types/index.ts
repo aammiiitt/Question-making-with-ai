@@ -236,6 +236,7 @@ export interface GenerateQuestionRequest {
   marks: number;
   difficulty: DifficultyLevel;
   language: Language;
+  preferExercise?: boolean;
   additionalInstructions?: string;
   regenerationContext?: {
     previousQuestionId?: string;
@@ -385,6 +386,7 @@ export interface PaperHealth {
   universalRulesPassedCount?: number;
   universalRulesTotalCount?: number;
   exerciseDerivationPercentage?: number;
+  exerciseCount?: number;
   exerciseKnownCount?: number;
   exerciseUnknownCount?: number;
   exerciseDerivationStatus?: 'compliant' | 'not_yet_verified' | 'failed';

@@ -267,7 +267,12 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
                 <div className="p-2.5 bg-slate-50 border border-slate-200 rounded">
                   <span className="font-bold text-slate-900 block mb-1">Class VI Mathematics Benchmark Profile:</span>
                   <p className="text-[11px] text-slate-600">
-                    Textbook Exercise Derivation: {report.subjectProfileAudit?.exerciseDerivationPercentage}% (Target ≥ 80%).
+                    Textbook Exercise Derivation:{' '}
+                    {report.subjectProfileAudit?.exerciseDerivationPercentage !== null &&
+                    report.subjectProfileAudit?.exerciseDerivationPercentage !== undefined
+                      ? `${report.subjectProfileAudit.exerciseDerivationPercentage}%`
+                      : 'Not yet verified'}{' '}
+                    (Target ≥ 80%).
                     Numerical step validation: verified.
                     Preservation of mathematical symbols & units: compliant.
                     Geometry constructions & 1+1 subparts: supported.

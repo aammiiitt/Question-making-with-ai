@@ -18,6 +18,7 @@ import {
   ChevronUp,
   Upload,
   Lock,
+  Languages,
 } from 'lucide-react';
 import {
   DocumentItem,
@@ -28,6 +29,7 @@ import {
   WeightageMode,
   SectionBlueprint,
   QuestionItem,
+  Language,
 } from '../../types';
 import { examPaperService } from '../../services/examPaperService';
 import { storageService } from '../../services/storageService';
@@ -566,6 +568,17 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
     setPaper(updated);
   };
 
+  const handleLanguageChange = (newLang: Language) => {
+    if (paper.outputLanguage === newLang) return;
+    const updated: ClassVIExamPaper = {
+      ...paper,
+      outputLanguage: newLang,
+      updated_at: new Date().toISOString(),
+    };
+    examPaperService.savePaper(updated);
+    setPaper(updated);
+  };
+
   const toggleSectionExpand = (secId: string) => {
     setExpandedSections((prev) => ({
       ...prev,
@@ -795,8 +808,8 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
         </div>
       </div>
 
-      {/* Textbook Source Banner */}
-      <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+      {/* Textbook Source & Language Configuration Banner */}
+      <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 shrink-0 border border-slate-200">
             <BookOpen className="w-5 h-5 text-slate-800" />
@@ -809,23 +822,57 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
             <p className="text-slate-500 text-[11px] mt-0.5">
               File: {currentBook.file_name} · {chapters.length} Detected Chapters · Strict Source Grounding Active
             </p>
+            {/* Requirement 6: Display separately Source Textbook Language & Output Question Paper Language */}
+            <div className="flex flex-wrap items-center gap-2.5 mt-1.5 pt-1 border-t border-slate-100 text-[11px]">
+              <span className="text-slate-600">
+                <span className="font-semibold text-slate-700">Source Textbook Language:</span>{' '}
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 font-medium">
+                  {currentBook.language || 'English'}
+                </span>
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="text-slate-600">
+                <span className="font-semibold text-slate-700">Output Question Paper Language:</span>{' '}
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold">
+                  {paper.outputLanguage === 'bn' ? 'Bengali' : paper.outputLanguage === 'en' ? 'English' : 'Bilingual'}
+                </span>
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Change book dropdown if teacher has multiple */}
-        {documents.length > 1 && (
-          <select
-            value={selectedBookId}
-            onChange={(e) => setSelectedBookId(e.target.value)}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-800"
-          >
-            {documents.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.is_demo ? `[DEMO / SAMPLE] ${d.title}` : d.title} ({d.page_count}p)
-              </option>
-            ))}
-          </select>
-        )}
+        {/* Right side controls: Language Selector & Document switcher */}
+        <div className="flex flex-wrap items-center gap-3 shrink-0 self-start md:self-auto">
+          {/* Requirement 6: Question Paper Language Selector */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+            <Languages className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            <span className="text-slate-600 font-semibold text-[11px]">Question Paper Language:</span>
+            <select
+              aria-label="Question Paper Language"
+              value={paper.outputLanguage || 'bn'}
+              onChange={(e) => handleLanguageChange(e.target.value as Language)}
+              className="bg-white border border-slate-200 text-slate-900 rounded-lg px-2 py-1 text-xs font-bold cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+            >
+              <option value="bn">Bengali</option>
+              <option value="en">English</option>
+              <option value="bilingual">Bilingual</option>
+            </select>
+          </div>
+
+          {documents.length > 1 && (
+            <select
+              value={selectedBookId}
+              onChange={(e) => setSelectedBookId(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-800"
+            >
+              {documents.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.is_demo ? `[DEMO / SAMPLE] ${d.title}` : d.title} ({d.page_count}p)
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Blueprint Preset Mode Selector */}

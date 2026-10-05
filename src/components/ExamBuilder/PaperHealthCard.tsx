@@ -44,7 +44,15 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
   const isAuditNeedsReview = !health.isReady && isQuestionsExact;
 
   const qualityScore = health.assessmentQualityScore ?? (health.isReady ? 100 : 85);
-  const exercisePct = health.exerciseDerivationPercentage ?? (mathAudit?.exerciseDerivationPercentage || 85);
+  const exerciseStatus =
+    health.exerciseDerivationStatus ||
+    mathAudit?.exerciseDerivationStatus ||
+    'not_yet_verified';
+  const exerciseCount = health.exerciseCount ?? (mathAudit?.exerciseCount || 0);
+  const exerciseKnown = health.exerciseKnownCount ?? (mathAudit?.exerciseKnownCount || 0);
+  const exerciseUnknown = health.exerciseUnknownCount ?? (mathAudit?.exerciseUnknownCount || 0);
+  const rawExercisePct = health.exerciseDerivationPercentage ?? (mathAudit?.exerciseDerivationPercentage ?? null);
+  const exercisePct = rawExercisePct ?? 0;
   const rulesPassed = health.universalRulesPassedCount ?? (universalAudit?.passedRulesCount || 14);
   const rulesTotal = health.universalRulesTotalCount ?? (universalAudit?.evaluatedRulesCount || 14);
 
@@ -174,14 +182,31 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
             <span className="text-[10px] text-slate-500 block font-medium">Math Exercise Derivation</span>
             <div className="flex items-center justify-between mt-0.5">
               <span className="text-sm font-bold text-slate-900">
-                {exercisePct}% (≥80%)
+                {rawExercisePct !== null ? `${rawExercisePct}%` : 'Pending'} (≥80%)
               </span>
-              {exercisePct >= 80 ? (
+              {exerciseStatus === 'compliant' ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : exerciseStatus === 'failed' ? (
+                <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
               ) : (
                 <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
               )}
             </div>
+            <span
+              className={`text-[9px] font-bold uppercase tracking-wider block mt-0.5 ${
+                exerciseStatus === 'compliant'
+                  ? 'text-emerald-700'
+                  : exerciseStatus === 'failed'
+                  ? 'text-rose-700'
+                  : 'text-amber-700'
+              }`}
+            >
+              {exerciseStatus === 'compliant'
+                ? 'COMPLIANT'
+                : exerciseStatus === 'failed'
+                ? 'FAILED / NEEDS IMPROVEMENT'
+                : 'NOT YET VERIFIED'}
+            </span>
           </div>
 
           <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
@@ -381,27 +406,66 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
                 ))}
               </div>
 
-              {/* Progress Bar for Exercise Derivation */}
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 text-xs">
+              {/* Visible Benchmark Metric Breakdown for Exercise Derivation */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3 text-xs">
                 <div className="flex items-center justify-between font-bold">
                   <span className="text-slate-800">
                     Textbook Exercise Derivation Rate (Target: ≥ 80%)
                   </span>
                   <span
-                    className={
-                      exercisePct >= 80 ? 'text-emerald-700' : 'text-amber-700'
-                    }
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                      exerciseStatus === 'compliant'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : exerciseStatus === 'failed'
+                        ? 'bg-rose-100 text-rose-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
                   >
-                    {exercisePct}% {exercisePct >= 80 ? '✓ Goal Exceeded' : 'Pending more exercises'}
+                    {exerciseStatus === 'compliant'
+                      ? 'COMPLIANT'
+                      : exerciseStatus === 'failed'
+                      ? 'FAILED / NEEDS IMPROVEMENT'
+                      : 'NOT YET VERIFIED'}
                   </span>
                 </div>
+
                 <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                   <div
                     className={`h-2.5 rounded-full transition-all ${
-                      exercisePct >= 80 ? 'bg-emerald-500' : 'bg-amber-500'
+                      exerciseStatus === 'compliant'
+                        ? 'bg-emerald-500'
+                        : exerciseStatus === 'failed'
+                        ? 'bg-rose-500'
+                        : 'bg-amber-400'
                     }`}
-                    style={{ width: `${Math.min(100, exercisePct)}%` }}
+                    style={{ width: `${Math.min(100, rawExercisePct || 0)}%` }}
                   />
+                </div>
+
+                {/* Visible Benchmark Statistics */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 font-mono text-[11px]">
+                  <div className="p-2.5 bg-white rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-500 block font-sans">Exercise-derived</span>
+                    <span className="font-bold text-slate-900 text-xs">{exerciseCount}</span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-500 block font-sans">Known classified sources</span>
+                    <span className="font-bold text-slate-900 text-xs">{exerciseKnown}</span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-500 block font-sans">Unknown source classification</span>
+                    <span className="font-bold text-slate-900 text-xs">{exerciseUnknown}</span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-500 block font-sans">Exercise percentage (known)</span>
+                    <span className="font-bold text-slate-900 text-xs">
+                      {rawExercisePct !== null ? `${rawExercisePct}%` : 'N/A (Not yet verified)'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-500 block font-sans">Target</span>
+                    <span className="font-bold text-slate-900 text-xs">≥ 80%</span>
+                  </div>
                 </div>
               </div>
             </div>

@@ -164,6 +164,9 @@ export class ExamPaperService {
       included[0].percentage = Number(((included[0].marks / 70) * 100).toFixed(1));
     }
 
+    // Source language derived from selected document language, output language default Bengali
+    const sourceLanguage = document.language || 'English';
+
     const paper: ClassVIExamPaper = {
       id: 'paper-c6-math-' + Date.now(),
       title: 'CLASS VI MATHEMATICS · 70-MARK BENCHMARK EXAMINATION',
@@ -174,6 +177,8 @@ export class ExamPaperService {
       timeAllowed: '2 Hours 30 Minutes',
       documentId: document.id,
       bookTitle: document.title,
+      sourceLanguage,
+      outputLanguage: 'bn', // Default Benchmark V1 output language is Bengali
       weightageMode: 'ai_recommended',
       blueprintPreset: 'benchmark_v1',
       chaptersWeightage: initialWeights,
@@ -355,8 +360,8 @@ export class ExamPaperService {
     onProgress?.(`Generating Slot ${slot.slotNumber} (${slot.marks}M ${slot.questionType.toUpperCase()})...`);
 
     try {
-      const exerciseHint = slot.isDerivedFromExercise
-        ? 'DERIVE DIRECTLY FROM TEXTBOOK EXERCISE / PRACTICE SECTION (নিজে করি, কষে দেখি, Exercise). '
+      const exerciseHint = slot.preferExerciseSource
+        ? 'PREFER DERIVING DIRECTLY FROM TEXTBOOK EXERCISE / PRACTICE SECTION (নিজে করি, কষে দেখি, Exercise) IF AVAILABLE IN RETRIEVED SOURCE. '
         : '';
       const geomHint = slot.isGeometryConstruction
         ? 'GEOMETRY CONSTRUCTION: Provide step-by-step ruler & compass construction instructions. '
@@ -375,14 +380,21 @@ export class ExamPaperService {
         questionType: slot.questionType,
         marks: slot.marks,
         difficulty: slot.difficulty,
-        language: 'en', // Class VI math default
+        language: paper.outputLanguage || 'bn', // Requirement 5: Use paper.outputLanguage (default Bengali)
+        preferExercise: slot.preferExerciseSource, // Requirement 4: Exercise-preferred retrieval
         additionalInstructions: `Strict Class VI Mathematics Benchmark standards. ${exerciseHint}${geomHint}${diagHint}${subpartsHint}MANDATORY: Ensure strict numerical and arithmetic validation. Preserve mathematical formulas, standard symbols (+, -, ×, ÷, =, ≠, <, >, °, %, fractions) and measurement units (cm, m, m², ₹, kg). In marking scheme, allocate intermediate marks for working steps.`,
       });
+
+      // Requirement 2: slot.sourceContentType and slot.isDerivedFromExercise assigned ONLY from actual supporting source
+      const realContentType = generated.source?.content_type || 'unknown';
+      const isDerived = realContentType === 'exercise';
 
       return {
         ...slot,
         status: 'generated',
         questionItem: generated,
+        sourceContentType: realContentType,
+        isDerivedFromExercise: isDerived,
         errorReason: undefined,
       };
     } catch (err: any) {
@@ -462,12 +474,17 @@ export class ExamPaperService {
       questionType: currentSlot.questionType,
       marks: currentSlot.marks, // STRICT: Keep same marks!
       difficulty: newDiff,
-      language: 'en',
+      language: paper.outputLanguage || 'bn', // Requirement 5: Use paper.outputLanguage (default Bengali)
+      preferExercise: currentSlot.preferExerciseSource, // Requirement 4: Exercise-preferred retrieval
       regenerationContext: {
         previousQuestionId: currentSlot.questionItem?.id,
         strategy: strategy === 'different_topic' ? 'same_topic_diff' : strategy,
       },
     });
+
+    // Requirement 2: Real source content classification on replaced question
+    const realContentType = newQuestion.source?.content_type || 'unknown';
+    const isDerived = realContentType === 'exercise';
 
     const updatedSlots = [...paper.slots];
     updatedSlots[slotIndex] = {
@@ -475,6 +492,8 @@ export class ExamPaperService {
       difficulty: newDiff,
       status: 'generated',
       questionItem: newQuestion,
+      sourceContentType: realContentType,
+      isDerivedFromExercise: isDerived,
       errorReason: undefined,
     };
 
@@ -716,9 +735,15 @@ export class ExamPaperService {
       universalRulesPassedCount = assessmentReport.universalAudit.passedRulesCount;
       universalRulesTotalCount = assessmentReport.universalAudit.evaluatedRulesCount;
       exerciseDerivationPercentage =
-        assessmentReport.subjectProfileAudit?.exerciseDerivationPercentage || 0;
+        assessmentReport.subjectProfileAudit?.exerciseDerivationPercentage ?? null;
       numericalValidationPassed =
         assessmentReport.subjectProfileAudit?.numericalValidationPassed ?? true;
+
+      const exerciseCount = assessmentReport.subjectProfileAudit?.exerciseCount ?? 0;
+      const exerciseKnownCount = assessmentReport.subjectProfileAudit?.exerciseKnownCount ?? 0;
+      const exerciseUnknownCount = assessmentReport.subjectProfileAudit?.exerciseUnknownCount ?? 0;
+      const exerciseDerivationStatus =
+        assessmentReport.subjectProfileAudit?.exerciseDerivationStatus ?? 'not_yet_verified';
 
       // Add any critical errors to health issues
       if (assessmentReport.criticalErrors && assessmentReport.criticalErrors.length > 0) {
@@ -768,7 +793,12 @@ export class ExamPaperService {
       assessmentQualityScore,
       universalRulesPassedCount,
       universalRulesTotalCount,
-      exerciseDerivationPercentage,
+      exerciseDerivationPercentage: exerciseDerivationPercentage ?? undefined,
+      exerciseCount: assessmentReport?.subjectProfileAudit?.exerciseCount ?? 0,
+      exerciseKnownCount: assessmentReport?.subjectProfileAudit?.exerciseKnownCount ?? 0,
+      exerciseUnknownCount: assessmentReport?.subjectProfileAudit?.exerciseUnknownCount ?? 0,
+      exerciseDerivationStatus:
+        assessmentReport?.subjectProfileAudit?.exerciseDerivationStatus ?? 'not_yet_verified',
       numericalValidationPassed,
       assessmentReport,
     };

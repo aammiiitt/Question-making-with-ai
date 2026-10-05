@@ -1,7 +1,8 @@
-import { GenerateQuestionRequest, QuestionItem, QuestionSource, AnswerItem } from '../types';
+import { GenerateQuestionRequest, QuestionItem, QuestionSource, AnswerItem, SourceContentType } from '../types';
 import { knowledgeRetrievalService } from './knowledgeRetrievalService';
 import { questionValidationService, StructuredAiOutput } from './questionValidationService';
 import { storageService } from './storageService';
+import { classifySourceContent } from '../utils/sourceClassification';
 
 export class QuestionGenerationService {
   /**
@@ -41,7 +42,8 @@ export class QuestionGenerationService {
       req.topicId,
       topic?.title,
       req.questionType,
-      req.additionalInstructions
+      req.additionalInstructions,
+      req.preferExercise
     );
 
     if (retrievedPassages.length === 0) {
@@ -160,6 +162,10 @@ export class QuestionGenerationService {
       isExcerptMatched = normSource.includes(searchSnippet);
     }
 
+    // Requirement 2: Real source content classification on actual supporting source passage
+    const realContentType: SourceContentType =
+      matchedPassage?.contentType || classifySourceContent(actualRetrievedText);
+
     const sourceObj: QuestionSource = {
       id: sourceId,
       question_id: questionId,
@@ -174,6 +180,7 @@ export class QuestionGenerationService {
       source_confidence: validation.isSourceVerified ? sanitized.source_confidence : 0.65,
       retrieved_chunk_ids: retrievedPassages.map((p) => p.chunkId),
       is_real_pdf_grounded: !document.is_demo,
+      content_type: realContentType,
     };
 
     const fullQuestion: QuestionItem = {

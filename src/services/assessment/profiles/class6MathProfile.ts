@@ -3,6 +3,7 @@ import {
   SubjectProfileAudit,
   SubjectRuleEvaluationResult,
   BenchmarkSection,
+  RuleStatus,
 } from '../types';
 import { ClassVIExamPaper, QuestionSlot } from '../../../types';
 
@@ -238,16 +239,31 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
     let invalidNumericalsCount = 0;
     let formulasUnitsPreserved = true;
 
+    let knownSourceCount = 0;
+    let exerciseCount = 0;
+    let unknownCount = 0;
+
     for (const slot of generatedSlots) {
       const q = slot.questionItem!;
       const fullText = (q.question_text + ' ' + (q.source?.source_text || '')).toLowerCase();
       const answerText = (q.answer?.answer_text || '').toLowerCase();
 
-      // 1. Exercise Derivation Detection
-      const isFromExercise = exerciseKeywords.some((kw) => fullText.includes(kw));
-      if (isFromExercise || slot.isDerivedFromExercise) {
-        exerciseSlots.push(slot.slotNumber);
+      // Requirement 2 & 3: Source Content Classification
+      // Classification MUST come from actual supporting source, NOT from question text keywords or pre-tagging
+      const rawContentType = q.source?.content_type || slot.sourceContentType || 'unknown';
+      const isKnown = rawContentType !== 'unknown';
+      const isExercise = rawContentType === 'exercise';
+
+      if (isKnown) {
+        knownSourceCount++;
+        if (isExercise) {
+          exerciseCount++;
+          exerciseSlots.push(slot.slotNumber);
+        } else {
+          conceptualSlots.push(slot.slotNumber);
+        }
       } else {
+        unknownCount++;
         conceptualSlots.push(slot.slotNumber);
       }
 
@@ -291,11 +307,34 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
       }
     }
 
-    // Exercise Derivation Metric
-    const totalGen = Math.max(1, generatedSlots.length);
-    const exercisePercentage = Math.round((exerciseSlots.length / totalGen) * 100);
-    const exerciseRulePassed =
-      generatedSlots.length === 0 || exercisePercentage >= this.exerciseDerivationTargetPercentage;
+    // Requirement 3: Exercise Benchmark Metric
+    // knownSourceCount = questions whose source.content_type !== 'unknown'
+    // exerciseCount = questions whose source.content_type === 'exercise'
+    // unknownCount = questions whose source.content_type === 'unknown' or missing classification
+    const hasSufficientEvidence = generatedSlots.length > 0 && knownSourceCount >= 5;
+    const exercisePercentage = knownSourceCount > 0 ? Math.round((exerciseCount / knownSourceCount) * 100) : 0;
+
+    let exerciseDerivationStatus: 'compliant' | 'not_yet_verified' | 'failed' = 'not_yet_verified';
+    let exerciseRuleStatus: RuleStatus = 'warning';
+    let exerciseRulePassed = false;
+    let exerciseSummary = '';
+
+    if (!hasSufficientEvidence) {
+      exerciseDerivationStatus = 'not_yet_verified';
+      exerciseRuleStatus = 'warning';
+      exerciseRulePassed = false;
+      exerciseSummary = `NOT YET VERIFIED: Insufficient classified source evidence (${knownSourceCount} known source passages). Benchmark requires question generation grounded in verified textbook passages.`;
+    } else if (exercisePercentage >= this.exerciseDerivationTargetPercentage) {
+      exerciseDerivationStatus = 'compliant';
+      exerciseRuleStatus = 'passed';
+      exerciseRulePassed = true;
+      exerciseSummary = `COMPLIANT: ${exercisePercentage}% of verified sources derived from textbook exercises (${exerciseCount}/${knownSourceCount} known sources). Target: >= ${this.exerciseDerivationTargetPercentage}%.`;
+    } else {
+      exerciseDerivationStatus = 'failed';
+      exerciseRuleStatus = 'failed';
+      exerciseRulePassed = false;
+      exerciseSummary = `FAILED / NEEDS IMPROVEMENT: ${exercisePercentage}% of verified sources derived from textbook exercises (${exerciseCount}/${knownSourceCount} known sources). Target: >= ${this.exerciseDerivationTargetPercentage}%.`;
+    }
 
     const numericalValidationPassed = invalidNumericalsCount === 0;
 
@@ -304,16 +343,25 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
       ruleId: 'math_exercise_derivation_target',
       name: 'Textbook Exercise & Practice Derivation (>= 80%)',
       category: 'subject_profile',
-      status: exerciseRulePassed ? 'passed' : 'warning',
+      status: exerciseRuleStatus,
       passed: exerciseRulePassed,
-      score: Math.min(100, Math.round((exercisePercentage / this.exerciseDerivationTargetPercentage) * 100)),
-      summary: `Exercise Derivation: ${exercisePercentage}% of offered questions derived from textbook practice/exercise sections (নিজে করি, কষে দেখি, Exercise). Target: >= ${this.exerciseDerivationTargetPercentage}%.`,
+      verificationStatus: exerciseDerivationStatus === 'compliant' ? 'verified' : exerciseDerivationStatus,
+      score: hasSufficientEvidence
+        ? Math.min(100, Math.round((exercisePercentage / this.exerciseDerivationTargetPercentage) * 100))
+        : 75,
+      summary: exerciseSummary,
       details: [
-        `${exerciseSlots.length} exercise/practice problems, ${conceptualSlots.length} foundational/theory questions.`,
+        `Exercise-derived: ${exerciseCount}`,
+        `Known classified sources: ${knownSourceCount}`,
+        `Unknown source classification: ${unknownCount}`,
+        `Exercise percentage among known sources: ${hasSufficientEvidence ? `${exercisePercentage}%` : 'N/A (Not yet verified)'}`,
+        `Target: >= ${this.exerciseDerivationTargetPercentage}%`,
       ],
       recommendation: exerciseRulePassed
         ? undefined
-        : 'Generate more questions derived from chapter exercise sections to meet the 80% practice target.',
+        : hasSufficientEvidence
+        ? 'Generate or retrieve more questions derived from chapter exercise/practice sections (নিজে করি, কষে দেখি) to achieve >=80%.'
+        : 'Generate examination slots to verify source classifications against authentic textbook pages.',
     };
 
     // Rule 2: Mandatory Numerical Validation
@@ -379,13 +427,14 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
     return {
       profileId: this.id,
       profileName: this.name,
-      passed,
+      passed: passed && (exerciseDerivationStatus === 'compliant' || exerciseDerivationStatus === 'not_yet_verified'),
       overallScore,
-      exerciseDerivationPercentage: exercisePercentage,
+      exerciseDerivationPercentage: hasSufficientEvidence ? exercisePercentage : null,
       exerciseDerivationTarget: this.exerciseDerivationTargetPercentage,
-      exerciseKnownCount: exerciseSlots.length,
-      exerciseUnknownCount: 0,
-      exerciseDerivationStatus: exerciseRulePassed ? 'compliant' : 'failed',
+      exerciseCount,
+      exerciseKnownCount: knownSourceCount,
+      exerciseUnknownCount: unknownCount,
+      exerciseDerivationStatus,
       numericalValidationStatus: numericalValidationPassed ? 'verified' : 'failed',
       numericalValidationPassed,
       structureCheckPassed: true,
@@ -397,7 +446,9 @@ export class ClassVIMathematicsProfile implements SubjectProfile {
         exerciseSlots,
         workedExampleSlots: [],
         theorySlots: conceptualSlots,
-        unknownClassificationSlots: [],
+        unknownClassificationSlots: generatedSlots
+          .filter((s) => (s.questionItem?.source?.content_type || s.sourceContentType) === 'unknown')
+          .map((s) => s.slotNumber),
         numericalSlots,
         geometrySlots,
         subpartSlots,

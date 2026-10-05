@@ -299,7 +299,7 @@ export class ConstraintSolver {
               questionType: grp.questionType,
               difficulty: q <= 3 ? 'easy' : q <= 6 ? 'moderate' : 'difficult',
               status: 'pending',
-              isDerivedFromExercise: q % 5 !== 0, // Target >= 80% exercise derived
+              preferExerciseSource: true, // Target >=80% exercise-derived retrieval
               isNumerical: ['fill_in_the_blank', 'very_short_answer', 'mcq'].includes(grp.questionType),
             });
           }
@@ -342,7 +342,7 @@ export class ConstraintSolver {
             questionType: sec.questionType || (mark >= 4 ? 'long_answer' : 'short_answer'),
             difficulty: diff,
             status: 'pending',
-            isDerivedFromExercise: slotIndex % 5 !== 0, // Target >= 80% exercise derived
+            preferExerciseSource: true, // Target >=80% exercise-derived retrieval
             isGeometryConstruction: isGeom && mark >= 3,
             hasDiagram: isGeom,
             isNumerical: true,

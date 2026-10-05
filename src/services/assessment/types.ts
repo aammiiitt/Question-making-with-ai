@@ -149,6 +149,7 @@ export interface SubjectProfileAudit {
   overallScore: number;
   exerciseDerivationPercentage: number | null; // e.g. 80% or null if not yet proven
   exerciseDerivationTarget: number; // 80%
+  exerciseCount: number;
   exerciseKnownCount: number;
   exerciseUnknownCount: number;
   exerciseDerivationStatus: 'compliant' | 'not_yet_verified' | 'failed';
