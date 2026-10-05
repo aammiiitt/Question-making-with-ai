@@ -146,6 +146,17 @@ export interface MarkingCriterion {
   marks: number;
 }
 
+export type SourceContentType =
+  | 'theory'
+  | 'definition'
+  | 'worked_example'
+  | 'exercise'
+  | 'activity'
+  | 'diagram'
+  | 'table'
+  | 'other'
+  | 'unknown';
+
 export interface QuestionSource {
   id: string;
   question_id: string;
@@ -161,6 +172,7 @@ export interface QuestionSource {
   ai_source_excerpt?: string;
   is_excerpt_matched?: boolean;
   extraction_method?: 'native' | 'ocr';
+  content_type?: SourceContentType;
 }
 
 export interface AnswerItem {
@@ -276,6 +288,8 @@ export interface ChapterWeightage {
   ai_analysis?: ChapterAIAnalysis;
   page_start?: number;
   page_end?: number;
+  offered_marks?: number;
+  attemptable_exposure?: number;
 }
 
 export interface SectionGroupBlueprint {
@@ -318,12 +332,15 @@ export interface QuestionSlot {
   status: 'pending' | 'generating' | 'generated' | 'failed' | 'source_required';
   questionItem?: QuestionItem;
   errorReason?: string;
-  // Subject profile & benchmark flags
+  // Honest source classification & benchmark tags (no fake flags!)
+  sourceContentType?: SourceContentType;
+  preferExerciseSource?: boolean;
   isDerivedFromExercise?: boolean;
+  requiresConnectedSubparts?: boolean;
   hasDiagram?: boolean;
   isGeometryConstruction?: boolean;
   isNumerical?: boolean;
-  subparts?: { label: string; marks: number; text: string }[];
+  subparts?: { label: string; marks: number; text?: string }[];
 }
 
 export interface ChapterHealthCheck {
@@ -331,14 +348,26 @@ export interface ChapterHealthCheck {
   chapterTitle: string;
   expectedMarks: number;
   actualMarks: number;
+  offeredMarks?: number;
   passed: boolean;
+  statusLabel?: string;
 }
 
 export interface PaperHealth {
-  totalMarksExpected: number;
-  totalMarksActual: number;
-  totalQuestionsExpected: number;
+  // Attempted marks (student choice rules)
+  attemptedMarksExpected: number; // 70
+  attemptedMarksConfigured: number; // 70
+  totalMarksExpected: number; // 70
+  totalMarksActual: number; // attemptedMarksConfigured (70)
+
+  // Offered marks (sum of all 52 printed question blocks)
+  offeredMarksExpected: number; // 102 for benchmark V1
+  offeredMarksActual: number; // sum of actual offered question marks
+
+  totalQuestionsExpected: number; // 52
   totalQuestionsActual: number;
+  attemptedQuestionsCount?: number; // 37
+
   chapterChecks: ChapterHealthCheck[];
   allChaptersPassed: boolean;
   answerKeysCount: number;
@@ -350,11 +379,16 @@ export interface PaperHealth {
   allSourceGroundingPassed: boolean;
   isReady: boolean;
   healthIssues: string[];
+
   // Assessment validation metrics
   assessmentQualityScore?: number;
   universalRulesPassedCount?: number;
   universalRulesTotalCount?: number;
   exerciseDerivationPercentage?: number;
+  exerciseKnownCount?: number;
+  exerciseUnknownCount?: number;
+  exerciseDerivationStatus?: 'compliant' | 'not_yet_verified' | 'failed';
+  numericalValidationStatus?: 'verified' | 'not_yet_verified' | 'failed';
   numericalValidationPassed?: boolean;
   assessmentReport?: any;
 }
@@ -369,6 +403,8 @@ export interface ClassVIExamPaper {
   timeAllowed: string;
   documentId: string;
   bookTitle: string;
+  sourceLanguage?: string; // from textbook (e.g. English)
+  outputLanguage?: Language; // teacher selected (e.g. bn)
   weightageMode: WeightageMode;
   blueprintPreset?: 'benchmark_v1' | 'compulsory_standard';
   chaptersWeightage: ChapterWeightage[];

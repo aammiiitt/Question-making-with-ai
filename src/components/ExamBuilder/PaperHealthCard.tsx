@@ -127,7 +127,7 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
         </div>
 
         {/* Global Key Metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs pt-1">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs pt-1">
           <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
             <span className="text-[10px] text-slate-500 block font-medium">Attempted Marks</span>
             <div className="flex items-center justify-between mt-0.5">
@@ -143,10 +143,24 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
           </div>
 
           <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
+            <span className="text-[10px] text-slate-500 block font-medium">Offered Marks</span>
+            <div className="flex items-center justify-between mt-0.5">
+              <span className="text-sm font-bold text-slate-900">
+                {health.offeredMarksActual} / {health.offeredMarksExpected || 102}m
+              </span>
+              {health.offeredMarksActual === (health.offeredMarksExpected || 102) ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+              )}
+            </div>
+          </div>
+
+          <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-100">
             <span className="text-[10px] text-slate-500 block font-medium">Universal Rules</span>
             <div className="flex items-center justify-between mt-0.5">
               <span className="text-sm font-bold text-slate-900">
-                {rulesPassed} / {rulesTotal} Passed
+                {rulesPassed} / {rulesTotal}
               </span>
               {rulesPassed === rulesTotal ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -160,7 +174,7 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
             <span className="text-[10px] text-slate-500 block font-medium">Math Exercise Derivation</span>
             <div className="flex items-center justify-between mt-0.5">
               <span className="text-sm font-bold text-slate-900">
-                {exercisePct}% (Target ≥80%)
+                {exercisePct}% (≥80%)
               </span>
               {exercisePct >= 80 ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -446,11 +460,16 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
           )}
 
           {/* Chapter-wise Breakdown Verification */}
-          <div className="pt-2 border-t border-slate-100">
-            <div className="flex items-center justify-between text-xs text-slate-700 font-bold mb-2">
-              <span>CHAPTER WEIGHTAGE AUDIT (HARD CONSTRAINT)</span>
-              <span className="text-[11px] font-normal text-slate-500">
-                {health.allChaptersPassed ? 'All chapter marks exact' : 'Discrepancy detected'}
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-700 gap-1">
+              <div>
+                <span className="font-bold">CHAPTER WEIGHTAGE & OPTIONAL CHOICE EXPOSURE</span>
+                <p className="text-[11px] text-slate-500">
+                  Target = intended 70-mark academic distribution · Offered = marks across 102 printed questions · Student choice exposure is variable.
+                </p>
+              </div>
+              <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full shrink-0">
+                {health.allChaptersPassed ? '✓ All chapters represented' : 'Discrepancy detected'}
               </span>
             </div>
 
@@ -458,22 +477,30 @@ export const PaperHealthCard: React.FC<PaperHealthCardProps> = ({ health }) => {
               {health.chapterChecks.map((chk) => (
                 <div
                   key={chk.chapterId}
-                  className={`p-2.5 rounded-xl border text-xs flex items-center justify-between ${
+                  className={`p-2.5 rounded-xl border text-xs flex flex-col justify-between gap-1.5 ${
                     chk.passed
                       ? 'bg-emerald-50/40 border-emerald-200/80 text-emerald-950 font-medium'
                       : 'bg-amber-50 border-amber-200 text-amber-950'
                   }`}
                 >
-                  <span className="truncate pr-2">{chk.chapterTitle}</span>
-                  <div className="flex items-center gap-1.5 shrink-0 font-bold">
-                    <span>
-                      {chk.actualMarks} / {chk.expectedMarks}m
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <span className="truncate pr-2 font-bold text-slate-900">{chk.chapterTitle}</span>
                     {chk.passed ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     ) : (
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                     )}
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-600 font-sans">
+                    <span>
+                      Target: <strong className="text-slate-900">{chk.expectedMarks}m</strong>
+                    </span>
+                    <span>
+                      Offered: <strong className="text-slate-900">{chk.offeredMarks ?? chk.actualMarks}m</strong>
+                    </span>
+                    <span className="text-[10px] bg-slate-200/70 text-slate-700 px-1.5 py-0.2 rounded font-medium">
+                      Variable Choice
+                    </span>
                   </div>
                 </div>
               ))}

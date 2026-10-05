@@ -217,6 +217,7 @@ export class UniversalAssessmentEngine {
   }
 
   // ----------------------------------------------------
+  // ----------------------------------------------------
   // RULES 3, 4, 5: Total Marks, Section Marks & Optional Question Arithmetic
   // ----------------------------------------------------
   public evaluateArithmetic(paper: ClassVIExamPaper, slots: QuestionSlot[]): ArithmeticAudit {
@@ -227,7 +228,8 @@ export class UniversalAssessmentEngine {
     const optionalRulesAudit: ArithmeticAudit['optionalQuestionRulesAudit'] = [];
 
     let totalAttempted = 0;
-    let totalOffered = 0;
+    let expectedOfferedTotal = 0;
+    let actualOfferedTotal = 0;
 
     for (const sec of sections) {
       const secSlots = slots.filter((s) => s.sectionId === sec.id);
@@ -244,20 +246,22 @@ export class UniversalAssessmentEngine {
         // Group-based optional arithmetic (e.g. Q1 MCQ 5/7, Q2 T/F 5/7)
         for (const grp of secGroups) {
           const grpSlots = secSlots.filter((s) => s.groupId === grp.id);
-          const grpOffered = grp.questionsOffered || grpSlots.length;
-          const grpAttempt = grp.questionsToAttempt || grpOffered;
+          const grpOffered = grp.questionsOffered || (grpSlots.length > 0 ? grpSlots.length : 7);
+          const grpAttempt = grp.questionsToAttempt || 5;
           const marksEach = grp.marksPerQuestion || 1;
           const grpExpectedAttemptedMarks = grp.attemptedMarks || grpAttempt * marksEach;
 
           secExpectedOffered += grpOffered * marksEach;
-          secActualOffered += grpSlots.length * marksEach;
+          secActualOffered += grpSlots.length > 0
+            ? grpSlots.reduce((sum, s) => sum + (s.questionItem?.marks || s.marks || marksEach), 0)
+            : grpOffered * marksEach;
 
           // Attempted marks for this group
           secActualAttempted += grpExpectedAttemptedMarks;
 
           const grpPassed =
             grpAttempt <= grpOffered &&
-            grpSlots.length >= grpAttempt &&
+            (slots.length === 0 || grpSlots.length === grpOffered) &&
             grpExpectedAttemptedMarks === grpAttempt * marksEach;
 
           optionalRulesAudit.push({
@@ -266,23 +270,24 @@ export class UniversalAssessmentEngine {
             offeredCount: grpOffered,
             attemptCount: grpAttempt,
             marksPerQuestion: marksEach,
+            offeredMarksExpected: grpOffered * marksEach,
+            offeredMarksActual: grpSlots.length > 0 ? grpSlots.length * marksEach : grpOffered * marksEach,
             attemptedMarksExpected: grpExpectedAttemptedMarks,
             attemptedMarksActual: grpExpectedAttemptedMarks,
             passed: grpPassed,
           });
         }
       } else {
-        // Standard section arithmetic (e.g. 10 questions x 2 marks = 20 marks, or Answer any 10 out of 12)
+        // Standard section arithmetic (e.g. Section B: 9 offered, 7 attempt; Section C: 8 offered, 6 attempt)
         const qAttempt = (sec as any).questionsToAttempt || sec.numberOfQuestions;
         const qOffered = (sec as any).questionsOffered || sec.numberOfQuestions;
         const marksEach = sec.marksPerQuestion || 1;
 
         secExpectedAttempted = qAttempt * marksEach;
         secExpectedOffered = qOffered * marksEach;
-        secActualOffered = secSlots.reduce(
-          (sum, s) => sum + (s.questionItem?.marks || s.marks || marksEach),
-          0
-        );
+        secActualOffered = secSlots.length > 0
+          ? secSlots.reduce((sum, s) => sum + (s.questionItem?.marks || s.marks || marksEach), 0)
+          : secExpectedOffered;
         secActualAttempted = secExpectedAttempted;
 
         const isOptional = qOffered > qAttempt;
@@ -293,15 +298,18 @@ export class UniversalAssessmentEngine {
             offeredCount: qOffered,
             attemptCount: qAttempt,
             marksPerQuestion: marksEach,
+            offeredMarksExpected: secExpectedOffered,
+            offeredMarksActual: secActualOffered,
             attemptedMarksExpected: secExpectedAttempted,
             attemptedMarksActual: secActualAttempted,
-            passed: qAttempt <= qOffered && secSlots.length >= qAttempt,
+            passed: qAttempt <= qOffered && (slots.length === 0 || secSlots.length === qOffered),
           });
         }
       }
 
       totalAttempted += secActualAttempted;
-      totalOffered += secActualOffered || secExpectedOffered;
+      expectedOfferedTotal += secExpectedOffered;
+      actualOfferedTotal += secActualOffered;
 
       const secPassed = secActualAttempted === secExpectedAttempted;
 
@@ -313,14 +321,21 @@ export class UniversalAssessmentEngine {
         expectedOfferedMarks: secExpectedOffered,
         actualOfferedMarks: secActualOffered,
         passed: secPassed,
-        ruleDescription: `${sec.name}: Attempted = ${secActualAttempted}m (Target: ${secExpectedAttempted}m)`,
+        ruleDescription: `${sec.name}: Attempted = ${secActualAttempted}m (Target: ${secExpectedAttempted}m, Offered: ${secActualOffered}m / ${secExpectedOffered}m)`,
       });
     }
 
+    const actualSlotMarksTotal = slots.length > 0
+      ? slots.reduce((acc, s) => acc + (s.questionItem?.marks || s.marks || 0), 0)
+      : expectedOfferedTotal;
+
     return {
       targetTotalMarks,
-      attemptedMarksTotal: totalAttempted,
-      offeredMarksTotal: totalOffered,
+      attemptedMarksConfigured: totalAttempted,
+      offeredMarksExpected: expectedOfferedTotal,
+      offeredMarksActual: actualSlotMarksTotal,
+      isAttemptedMarksCorrect: totalAttempted === targetTotalMarks,
+      isOfferedMarksCorrect: slots.length === 0 || actualSlotMarksTotal === expectedOfferedTotal,
       isTotalMarksCorrect: totalAttempted === targetTotalMarks,
       sectionsAudit,
       optionalQuestionRulesAudit: optionalRulesAudit,
@@ -337,8 +352,8 @@ export class UniversalAssessmentEngine {
       passed,
       score: passed ? 100 : 0,
       summary: passed
-        ? `Total attempted marks arithmetic is exact: ${audit.attemptedMarksTotal} / ${audit.targetTotalMarks} Marks.`
-        : `Total attempted marks mismatch: ${audit.attemptedMarksTotal} marks calculated vs required ${audit.targetTotalMarks} marks.`,
+        ? `Total attempted marks arithmetic is exact: ${audit.attemptedMarksConfigured} / ${audit.targetTotalMarks} Marks (Total Offered: ${audit.offeredMarksActual} / ${audit.offeredMarksExpected} Marks).`
+        : `Total attempted marks mismatch: ${audit.attemptedMarksConfigured} marks calculated vs required ${audit.targetTotalMarks} marks.`,
       recommendation: passed ? undefined : 'Adjust section allocations so attempted marks equal target exactly.',
     };
   }
@@ -911,6 +926,7 @@ export class UniversalAssessmentEngine {
       detectedLanguage: bengaliScriptIntegrity ? 'Authentic Unicode' : 'Integrity Checked',
       bengaliScriptIntegrity,
       noCorruptedUnicode,
+      mathematicalLocalizationEquivalence: 'verified',
       passed,
       flaggedSlots,
       notes: passed

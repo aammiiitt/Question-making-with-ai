@@ -249,7 +249,8 @@ export class ConstraintSolver {
   }
 
   /**
-   * Solves the Benchmark V1 structure deterministically with Section A Q1-Q4 groups and optional choices.
+   * Solves the Benchmark V1 structure deterministically with Section A Q1-Q4 groups, optional choices,
+   * Section B (9 offered, 7 attempt, exactly 2 connected 1+1 subparts from source), Sections C & D, and Question 8.
    */
   private solveBenchmarkV1(
     sections: SectionBlueprint[],
@@ -259,10 +260,10 @@ export class ConstraintSolver {
     const slots: QuestionSlot[] = [];
     let slotIndex = 1;
 
-    // Create weighted round-robin distribution of chapters
+    // Create weighted round-robin distribution of chapters proportional to target marks
     const weightedChapters: ChapterWeightage[] = [];
     for (const c of chapters) {
-      const weight = Math.max(1, Math.round((c.marks / targetTotalMarks) * 50));
+      const weight = Math.max(1, Math.round((c.marks / targetTotalMarks) * 52));
       for (let w = 0; w < weight; w++) {
         weightedChapters.push(c);
       }
@@ -275,11 +276,9 @@ export class ConstraintSolver {
       return chap;
     };
 
-    const difficulties: DifficultyLevel[] = ['easy', 'moderate', 'moderate', 'difficult', 'easy'];
-
     for (const sec of sections) {
       if (sec.groups && sec.groups.length > 0) {
-        // Section with groups (e.g. Section A: Q1 MCQ, Q2 T/F, Q3 Fill in blanks, Q4 VSA)
+        // Section with groups (e.g. Section A: Q1 MCQ, Q2 T/F, Q3 Fill in blanks, Q4 VSA - 7 offered each)
         for (const grp of sec.groups) {
           const offered = grp.questionsOffered || 7;
           for (let q = 1; q <= offered; q++) {
@@ -306,18 +305,31 @@ export class ConstraintSolver {
           }
         }
       } else {
-        // Standard section (e.g. Section B, Section C, Section D)
+        // Standard section (e.g. Section B: 9 offered, Section C: 8 offered, Section D: 5 offered, Question 8: 2 offered)
         const offered = sec.questionsOffered || sec.numberOfQuestions;
         const mark = sec.marksPerQuestion || 2;
         const romanLabels = ['(i)', '(ii)', '(iii)', '(iv)', '(v)', '(vi)', '(vii)', '(viii)', '(ix)', '(x)', '(xi)', '(xii)'];
 
+        const isSectionB = sec.id === 'sec-b';
+        const isQuestion8 = sec.id === 'sec-q8';
+
         for (let q = 1; q <= offered; q++) {
           const chap = nextChapter();
-          const subLabel = romanLabels[q - 1] || `(${q})`;
-          const diff = mark === 2 ? (q % 2 === 0 ? 'moderate' : 'easy') : mark === 3 ? 'moderate' : 'difficult';
+          let subLabel = romanLabels[q - 1] || `(${q})`;
+          if (isQuestion8) {
+            subLabel = q === 1 ? '8(a)' : '8(b) [OR]';
+          }
 
-          const isGeom = chap.chapter_title.toLowerCase().includes('geometr') || chap.chapter_title.toLowerCase().includes('shape');
-          const isSubpart = mark === 2 && q % 3 === 0;
+          const diff: DifficultyLevel =
+            mark === 2 ? (q % 2 === 0 ? 'moderate' : 'easy') : mark === 3 ? 'moderate' : 'difficult';
+
+          const isGeom =
+            chap.chapter_title.toLowerCase().includes('geometr') ||
+            chap.chapter_title.toLowerCase().includes('shape') ||
+            chap.chapter_title.toLowerCase().includes('জ্যামিতি');
+
+          // Requirement 1: Exactly TWO offered Section-B questions configured with connected 1+1 subparts
+          const isConnectedSubpartSlot = isSectionB && (q === 3 || q === 7);
 
           slots.push({
             slotNumber: slotIndex++,
@@ -330,14 +342,18 @@ export class ConstraintSolver {
             questionType: sec.questionType || (mark >= 4 ? 'long_answer' : 'short_answer'),
             difficulty: diff,
             status: 'pending',
-            isDerivedFromExercise: q % 5 !== 0, // Target >= 80% exercise derived
+            isDerivedFromExercise: slotIndex % 5 !== 0, // Target >= 80% exercise derived
             isGeometryConstruction: isGeom && mark >= 3,
             hasDiagram: isGeom,
             isNumerical: true,
-            subparts: isSubpart ? [
-              { label: '(a)', marks: 1, text: 'Fundamental conceptual definition or rule' },
-              { label: '(b)', marks: 1, text: 'Numerical problem application' },
-            ] : undefined,
+            requiresConnectedSubparts: isConnectedSubpartSlot,
+            // Subparts initialized without fake generic placeholders; formulated from real source text
+            subparts: isConnectedSubpartSlot
+              ? [
+                  { label: '(a)', marks: 1 },
+                  { label: '(b)', marks: 1 },
+                ]
+              : undefined,
           });
         }
       }

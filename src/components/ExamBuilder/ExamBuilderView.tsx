@@ -544,7 +544,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
       );
 
       updatedPaper.slots = finalSlots;
-      updatedPaper.paperHealth = examPaperService.computePaperHealth(finalSlots, updatedWeights, 70);
+      updatedPaper.paperHealth = examPaperService.computePaperHealth(finalSlots, updatedWeights, 70, updatedPaper);
       examPaperService.savePaper(updatedPaper);
       setPaper(updatedPaper);
     } else {
@@ -848,7 +848,7 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
             <p className="text-slate-500 text-[11px] mt-0.5">
               {paper.blueprintPreset === 'compulsory_standard'
                 ? 'Standard 70-mark paper without optional choice groups (10×1m, 10×2m, 8×3m, 4×4m = 70m compulsory).'
-                : 'Class VI Mathematics Benchmark: Section A (MCQ, True/False, Fill in blanks, VSA: 7 offered, 5 attempted each = 20M) + Section B (10/12 = 20M) + Section C (5/7 = 15M) + Section D (3/4 = 15M) = 70 Attempted / 93 Offered.'}
+                : 'Class VI Mathematics Benchmark: Section A (MCQ, True/False, Fill in blanks, VSA: 7 offered, 5 attempted each = 20M) + Section B (7/9 = 14M) + Section C (6/8 = 18M) + Section D (3/5 = 12M) + Question 8 (1/2 = 6M) = 70 Attempted / 102 Offered (52 question blocks, 37 attempted).'}
             </p>
           </div>
         </div>
@@ -1147,7 +1147,8 @@ export const ExamBuilderView: React.FC<ExamBuilderViewProps> = ({
             const health = examPaperService.computePaperHealth(
               updatedSlots,
               paper.chaptersWeightage,
-              70
+              70,
+              paper
             );
             const updated = {
               ...paper,

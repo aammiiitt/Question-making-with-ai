@@ -56,8 +56,11 @@ export interface DuplicateMatch {
 
 export interface ArithmeticAudit {
   targetTotalMarks: number;
-  attemptedMarksTotal: number;
-  offeredMarksTotal: number;
+  attemptedMarksConfigured: number;
+  offeredMarksExpected: number;
+  offeredMarksActual: number;
+  isAttemptedMarksCorrect: boolean;
+  isOfferedMarksCorrect: boolean;
   isTotalMarksCorrect: boolean;
   sectionsAudit: {
     sectionId: string;
@@ -75,6 +78,8 @@ export interface ArithmeticAudit {
     offeredCount: number;
     attemptCount: number;
     marksPerQuestion: number;
+    offeredMarksExpected: number;
+    offeredMarksActual: number;
     attemptedMarksExpected: number;
     attemptedMarksActual: number;
     passed: boolean;
@@ -97,8 +102,9 @@ export interface DifficultyAudit {
 export interface LanguageIntegrityAudit {
   expectedLanguage: Language;
   detectedLanguage: string;
-  bengaliScriptIntegrity: boolean;
-  noCorruptedUnicode: boolean;
+  bengaliScriptIntegrity: boolean; // deterministic script check
+  noCorruptedUnicode: boolean; // deterministic glyph check
+  mathematicalLocalizationEquivalence: 'verified' | 'not_yet_verified';
   passed: boolean;
   flaggedSlots: number[];
   notes: string;
@@ -130,6 +136,7 @@ export interface SubjectRuleEvaluationResult {
   passed: boolean;
   score: number; // 0 to 100
   summary: string;
+  verificationStatus?: 'verified' | 'not_yet_verified' | 'failed';
   details?: string[];
   affectedSlotNumbers?: number[];
   recommendation?: string;
@@ -140,16 +147,23 @@ export interface SubjectProfileAudit {
   profileName: string;
   passed: boolean;
   overallScore: number;
-  exerciseDerivationPercentage: number; // e.g. 85%
-  exerciseDerivationTarget: number; // e.g. 80%
+  exerciseDerivationPercentage: number | null; // e.g. 80% or null if not yet proven
+  exerciseDerivationTarget: number; // 80%
+  exerciseKnownCount: number;
+  exerciseUnknownCount: number;
+  exerciseDerivationStatus: 'compliant' | 'not_yet_verified' | 'failed';
+  numericalValidationStatus: 'verified' | 'not_yet_verified' | 'failed';
   numericalValidationPassed: boolean;
-  formulasAndUnitsPreserved: boolean;
-  geometryConstructionsCompliant: boolean;
-  connectedSubpartsCompliant: boolean;
+  structureCheckPassed: boolean;
+  formulasAndUnitsPreserved: boolean | 'not_yet_verified';
+  geometryConstructionsStatus: 'compliant' | 'not_yet_verified' | 'none_detected';
+  connectedSubpartsStatus: 'compliant' | 'not_yet_verified' | 'failed';
   results: SubjectRuleEvaluationResult[];
   details: {
     exerciseSlots: number[];
-    conceptualSlots: number[];
+    workedExampleSlots: number[];
+    theorySlots: number[];
+    unknownClassificationSlots: number[];
     numericalSlots: number[];
     geometrySlots: number[];
     subpartSlots: number[];

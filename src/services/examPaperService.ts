@@ -92,9 +92,10 @@ export class ExamPaperService {
         slots: [], // reset affected questions/slots
         aiAnalyses: undefined, // reset analyses to require recalculation
         status: 'configuring', // mark paper as needing recalculation
-        paperHealth: this.computePaperHealth([], updatedWeights, 70),
+        paperHealth: {} as any,
         updated_at: new Date().toISOString(),
       };
+      synchronizedPaper.paperHealth = this.computePaperHealth([], updatedWeights, 70, synchronizedPaper);
 
       this.savePaper(synchronizedPaper);
       return synchronizedPaper;
@@ -178,11 +179,13 @@ export class ExamPaperService {
       chaptersWeightage: initialWeights,
       sections: CLASS_VI_MATH_BENCHMARK_PRESET.sections as SectionBlueprint[],
       slots: [],
-      paperHealth: this.computePaperHealth([], initialWeights, 70),
+      paperHealth: {} as any,
       status: 'configuring',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
+
+    paper.paperHealth = this.computePaperHealth([], initialWeights, 70, paper);
 
     this.savePaper(paper);
     return paper;
@@ -213,7 +216,8 @@ export class ExamPaperService {
     updatedPaper.paperHealth = this.computePaperHealth(
       [],
       updatedPaper.chaptersWeightage,
-      70
+      70,
+      updatedPaper
     );
 
     this.savePaper(updatedPaper);
@@ -278,7 +282,7 @@ export class ExamPaperService {
       updated_at: new Date().toISOString(),
     };
 
-    updated.paperHealth = this.computePaperHealth(updated.slots, updatedWeights, 70);
+    updated.paperHealth = this.computePaperHealth(updated.slots, updatedWeights, 70, updated);
     this.savePaper(updated);
     return updated;
   }
@@ -312,7 +316,8 @@ export class ExamPaperService {
     updatedPaper.paperHealth = this.computePaperHealth(
       solverRes.slots,
       updatedWeights,
-      70
+      70,
+      updatedPaper
     );
 
     this.savePaper(updatedPaper);
@@ -360,8 +365,8 @@ export class ExamPaperService {
         ? 'INCLUDE CLEAR DIAGRAM / FIGURE DESCRIPTION. '
         : '';
       const subpartsHint =
-        slot.subparts && slot.subparts.length > 1
-          ? 'FORMAT AS CONNECTED 1+1 SUBPARTS: (a) 1-mark conceptual rule, (b) 1-mark numerical problem. '
+        slot.requiresConnectedSubparts || (slot.subparts && slot.subparts.length > 1)
+          ? 'FORMAT AS CONNECTED 1+1 SUBPARTS: (a) [1 mark] and (b) [1 mark]. Both subparts MUST belong to the same connected mathematical concept/topic and be formulated directly from the retrieved textbook source passage. DO NOT use generic placeholder text; formulate real questions for both parts. '
           : '';
 
       const generated = await questionGenerationService.generateQuestion({
@@ -410,7 +415,7 @@ export class ExamPaperService {
       onSlotUpdated({ ...finishedSlot }, Math.round(((i + 1) / total) * 100));
     }
 
-    const health = this.computePaperHealth(updatedSlots, paper.chaptersWeightage, 70);
+    const health = this.computePaperHealth(updatedSlots, paper.chaptersWeightage, 70, paper);
     const finishedPaper: ClassVIExamPaper = {
       ...paper,
       slots: updatedSlots,
@@ -473,7 +478,7 @@ export class ExamPaperService {
       errorReason: undefined,
     };
 
-    const health = this.computePaperHealth(updatedSlots, paper.chaptersWeightage, 70);
+    const health = this.computePaperHealth(updatedSlots, paper.chaptersWeightage, 70, paper);
     const updatedPaper: ClassVIExamPaper = {
       ...paper,
       slots: updatedSlots,
@@ -486,34 +491,112 @@ export class ExamPaperService {
   }
 
   /**
-   * Evaluates PAPER HEALTH comprehensively.
-   * Total Marks 70/70, Question Counts, Chapter Checks, Answer Keys, Marking Schemes, Duplicates.
+   * Evaluates PAPER HEALTH comprehensively for Benchmark V1 (102 offered / 70 attempted)
+   * or standard compulsory mode.
+   * Requirement 2: Distinguishes offeredMarksActual (102) vs attemptedMarksConfigured (70).
+   * Requirement 3: Tracks TARGET vs OFFERED chapter weightage separately.
+   * Requirement 4: Uses actual paper sections, not DEFAULT_SECTION_BLUEPRINTS.
    */
   public computePaperHealth(
     slots: QuestionSlot[],
     chaptersWeightage: ChapterWeightage[],
-    targetTotalMarks: number = 70
+    targetTotalMarks: number = 70,
+    sectionsOrPaper?: SectionBlueprint[] | ClassVIExamPaper
   ): PaperHealth {
     const includedChapters = chaptersWeightage.filter((c) => c.included && c.marks > 0);
 
-    const actualTotalMarks = slots.reduce((acc, s) => {
-      // If generated, use questionItem.marks, else use slot.marks
+    // Requirement 4: Resolve actual paper sections (never default to DEFAULT_SECTION_BLUEPRINTS silently)
+    const activeSections: SectionBlueprint[] = sectionsOrPaper
+      ? (Array.isArray(sectionsOrPaper)
+          ? sectionsOrPaper
+          : (sectionsOrPaper as ClassVIExamPaper).sections || (CLASS_VI_MATH_BENCHMARK_PRESET.sections as SectionBlueprint[]))
+      : (CLASS_VI_MATH_BENCHMARK_PRESET.sections as SectionBlueprint[]);
+
+    // Calculate blueprint totals from actual active sections
+    let attemptedMarksConfigured = 0;
+    let offeredMarksExpected = 0;
+    let attemptedQuestionsExpected = 0;
+    let offeredQuestionsExpected = 0;
+
+    for (const sec of activeSections) {
+      const secGroups = (sec as any).groups as any[] | undefined;
+      if (secGroups && secGroups.length > 0) {
+        for (const grp of secGroups) {
+          const grpAttempt = grp.questionsToAttempt || 5;
+          const grpOffered = grp.questionsOffered || 7;
+          const m = grp.marksPerQuestion || 1;
+          attemptedMarksConfigured += (grp.attemptedMarks || (grpAttempt * m));
+          offeredMarksExpected += grpOffered * m;
+          attemptedQuestionsExpected += grpAttempt;
+          offeredQuestionsExpected += grpOffered;
+        }
+      } else {
+        const qAttempt = (sec as any).questionsToAttempt || sec.numberOfQuestions;
+        const qOffered = (sec as any).questionsOffered || sec.numberOfQuestions;
+        const m = sec.marksPerQuestion;
+        attemptedMarksConfigured += qAttempt * m;
+        offeredMarksExpected += qOffered * m;
+        attemptedQuestionsExpected += qAttempt;
+        offeredQuestionsExpected += qOffered;
+      }
+    }
+
+    if (attemptedMarksConfigured === 0) attemptedMarksConfigured = targetTotalMarks;
+    if (offeredMarksExpected === 0) offeredMarksExpected = 102;
+    if (offeredQuestionsExpected === 0) offeredQuestionsExpected = 52;
+    if (attemptedQuestionsExpected === 0) attemptedQuestionsExpected = 37;
+
+    // Requirement 2:
+    // A. offeredMarksActual = sum of marks of ALL printed/generated slots (Expected = 102 for Benchmark V1)
+    // B. attemptedMarksConfigured = marks a student is instructed to attempt based on choice rules (Expected = 70)
+    const offeredMarksActual = slots.reduce((acc, s) => {
       return acc + (s.questionItem?.marks || s.marks || 0);
     }, 0);
 
-    const expectedQuestions = slots.length;
+    const expectedQuestions = slots.length > 0 ? slots.length : offeredQuestionsExpected;
     const actualQuestions = slots.filter((s) => s.status === 'generated' && s.questionItem).length;
 
-    // Check every chapter's assigned marks vs expected
+    // Requirement 3: Track TARGET vs OFFERED chapter weightage separately
+    // Intended academic target is 70m distribution. Offered questions span 102 printed marks.
+    // Do NOT compare target marks directly with offered sum and fail.
+    const isOptionalChoicePaper = offeredMarksExpected > attemptedMarksConfigured;
+
     const chapterChecks = includedChapters.map((cw) => {
       const chapterSlots = slots.filter((s) => s.chapterId === cw.chapter_id);
-      const actualMarks = chapterSlots.reduce((acc, s) => acc + (s.questionItem?.marks || s.marks || 0), 0);
+      const offeredMarks = chapterSlots.reduce(
+        (acc, s) => acc + (s.questionItem?.marks || s.marks || 0),
+        0
+      );
+      const generatedCount = chapterSlots.filter((s) => s.status === 'generated' && s.questionItem).length;
+      const totalSlotCount = chapterSlots.length;
+
+      let passed = false;
+      let statusLabel = 'Variable (Student Choice)';
+
+      if (isOptionalChoicePaper) {
+        if (slots.length === 0) {
+          passed = cw.marks > 0;
+          statusLabel = `Target: ${cw.marks}m (Academic 70m)`;
+        } else {
+          // Chapter passes if it has allocated question slots and provides choice exposure
+          passed = offeredMarks > 0;
+          statusLabel = `Target: ${cw.marks}m · Offered: ${offeredMarks}m [Variable Student Choice]`;
+        }
+      } else {
+        passed = slots.length === 0 ? true : offeredMarks === cw.marks;
+        statusLabel = passed ? 'Exact Match' : 'Mismatch';
+      }
+
       return {
         chapterId: cw.chapter_id,
         chapterTitle: cw.chapter_title,
-        expectedMarks: cw.marks,
-        actualMarks,
-        passed: actualMarks === cw.marks,
+        expectedMarks: cw.marks, // TARGET chapter weightage (70m distribution)
+        actualMarks: offeredMarks, // OFFERED chapter marks across printed slots
+        offeredMarks: offeredMarks,
+        slotCount: totalSlotCount,
+        generatedCount,
+        passed,
+        statusLabel,
       };
     });
 
@@ -533,8 +616,7 @@ export class ExamPaperService {
     for (const s of slots) {
       if (s.questionItem) {
         if (s.questionItem.answer?.answer_text?.trim()) answerKeysCount++;
-        
-        // Phase 6: Validate that sum(marking_scheme.marks) === question.marks
+
         const ms = s.questionItem.answer?.marking_scheme;
         if (Array.isArray(ms) && ms.length > 0) {
           markingSchemesCount++;
@@ -553,7 +635,6 @@ export class ExamPaperService {
           questionTexts.push(normText);
         }
 
-        // Phase 5 & 7: Check real source passage grounding
         const hasRealSource = Boolean(
           s.questionItem.source?.source_text && s.questionItem.source.source_text.trim().length > 20
         );
@@ -568,20 +649,28 @@ export class ExamPaperService {
 
     const allMarkingSchemesSumValid = invalidMarkingSchemeSlotNumbers.length === 0;
 
-    if (actualTotalMarks !== targetTotalMarks) {
-      healthIssues.push(`Total marks (${actualTotalMarks}) does not match target ${targetTotalMarks} marks.`);
+    // Requirement 2: Strict distinction in health issues
+    if (attemptedMarksConfigured !== targetTotalMarks) {
+      healthIssues.push(
+        `Attempted marks (${attemptedMarksConfigured}) does not match target ${targetTotalMarks} marks.`
+      );
     }
-    if (expectedQuestions > 0 && actualQuestions < expectedQuestions) {
-      healthIssues.push(`${expectedQuestions - actualQuestions} question slots pending generation.`);
+    if (slots.length > 0 && offeredMarksActual !== offeredMarksExpected) {
+      healthIssues.push(
+        `Total offered marks (${offeredMarksActual}) does not match blueprint total (${offeredMarksExpected} marks across ${expectedQuestions} slots).`
+      );
+    }
+    if (slots.length > 0 && actualQuestions < slots.length) {
+      healthIssues.push(`${slots.length - actualQuestions} question slots pending generation.`);
     }
     if (!allChaptersPassed) {
-      healthIssues.push('Chapter marks allocation does not match exact teacher targets.');
+      healthIssues.push('Some chapters lack questions in the active examination blueprint.');
     }
     if (duplicateCount > 0) {
       healthIssues.push(`${duplicateCount} duplicate question(s) detected.`);
     }
-    if (expectedQuestions > 0 && answerKeysCount < expectedQuestions) {
-      healthIssues.push(`Missing answer keys (${answerKeysCount}/${expectedQuestions}).`);
+    if (slots.length > 0 && answerKeysCount < slots.length) {
+      healthIssues.push(`Missing answer keys (${answerKeysCount}/${slots.length}).`);
     }
     if (!allMarkingSchemesSumValid) {
       healthIssues.push(
@@ -602,20 +691,21 @@ export class ExamPaperService {
 
     try {
       const syntheticPaper: ClassVIExamPaper = {
-        id: 'eval-paper',
-        title: 'Class VI Mathematics Paper',
-        schoolName: 'School',
+        id: (sectionsOrPaper as ClassVIExamPaper)?.id || 'eval-paper',
+        title: (sectionsOrPaper as ClassVIExamPaper)?.title || 'Class VI Mathematics Paper',
+        schoolName: (sectionsOrPaper as ClassVIExamPaper)?.schoolName || 'School',
         className: 'Class VI',
         subject: 'Mathematics',
         totalMarks: targetTotalMarks,
-        timeAllowed: '2h 30m',
-        documentId: '',
-        bookTitle: '',
+        timeAllowed: (sectionsOrPaper as ClassVIExamPaper)?.timeAllowed || '2h 30m',
+        documentId: (sectionsOrPaper as ClassVIExamPaper)?.documentId || '',
+        bookTitle: (sectionsOrPaper as ClassVIExamPaper)?.bookTitle || '',
         weightageMode: 'exact_marks',
         chaptersWeightage,
-        sections: DEFAULT_SECTION_BLUEPRINTS,
+        sections: activeSections, // Requirement 4: ACTUAL SECTIONS
         slots,
         paperHealth: {} as any,
+        blueprintPreset: (sectionsOrPaper as ClassVIExamPaper)?.blueprintPreset || 'benchmark_v1',
         status: 'draft',
         created_at: '',
         updated_at: '',
@@ -630,7 +720,7 @@ export class ExamPaperService {
       numericalValidationPassed =
         assessmentReport.subjectProfileAudit?.numericalValidationPassed ?? true;
 
-      // Add any universal assessment findings to healthIssues
+      // Add any critical errors to health issues
       if (assessmentReport.criticalErrors && assessmentReport.criticalErrors.length > 0) {
         for (const err of assessmentReport.criticalErrors) {
           if (!healthIssues.includes(err)) healthIssues.push(err);
@@ -642,22 +732,28 @@ export class ExamPaperService {
 
     // Phase 7: Strict READY condition
     const isReady =
-      actualTotalMarks === targetTotalMarks &&
-      expectedQuestions > 0 &&
-      actualQuestions === expectedQuestions &&
+      attemptedMarksConfigured === targetTotalMarks &&
+      (slots.length === 0 ? false : offeredMarksActual === offeredMarksExpected) &&
+      slots.length > 0 &&
+      actualQuestions === slots.length &&
       allChaptersPassed &&
       duplicateCount === 0 &&
-      answerKeysCount === expectedQuestions &&
-      markingSchemesCount === expectedQuestions &&
+      answerKeysCount === slots.length &&
+      markingSchemesCount === slots.length &&
       allMarkingSchemesSumValid &&
       allSourceGroundingPassed &&
       (assessmentReport ? assessmentReport.criticalErrors.length === 0 : true);
 
     return {
+      attemptedMarksExpected: targetTotalMarks,
+      attemptedMarksConfigured,
       totalMarksExpected: targetTotalMarks,
-      totalMarksActual: actualTotalMarks,
-      totalQuestionsExpected: expectedQuestions,
+      totalMarksActual: attemptedMarksConfigured,
+      offeredMarksExpected,
+      offeredMarksActual,
+      totalQuestionsExpected: slots.length > 0 ? slots.length : offeredQuestionsExpected,
       totalQuestionsActual: actualQuestions,
+      attemptedQuestionsCount: attemptedQuestionsExpected,
       chapterChecks,
       allChaptersPassed,
       answerKeysCount,

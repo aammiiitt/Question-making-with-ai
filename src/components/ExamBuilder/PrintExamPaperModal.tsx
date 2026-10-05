@@ -39,7 +39,7 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
                 CLASS VI MATHEMATICS · 70-MARK BENCHMARK EXAMINATION
               </h2>
               <p className="text-xs text-slate-500">
-                Print & Export Preview · {isBenchmark ? 'Benchmark V1 (Section A Q1-Q4 with 7-choose-5, Sec B, C, D)' : 'Standard Compulsory 32 Questions'}
+                Print & Export Preview · {isBenchmark ? 'Benchmark V1 (52 Offered Questions · 102 Offered Marks / 70 Attempted Marks · 37 Attempted Questions)' : 'Standard Compulsory 32 Questions'}
               </p>
             </div>
           </div>
@@ -84,7 +84,7 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
           </div>
 
           <span className="font-bold text-slate-900">
-            {paper.slots.length} Offered Questions · Attempted Marks: {paper.totalMarks}
+            {paper.slots.length > 0 ? paper.slots.length : 52} Offered Questions (102 Marks) · Attempted Marks: {paper.totalMarks} (37 Questions Attempted)
           </span>
         </div>
 
@@ -101,7 +101,7 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
             <div className="flex items-center justify-between text-xs pt-2 font-sans font-medium text-slate-700 border-t border-slate-300 mt-2">
               <span>{paper.className} · {paper.subject}</span>
               <span>Time Allowed: {paper.timeAllowed}</span>
-              <span className="font-bold">Full Marks (Attempted): {paper.totalMarks}</span>
+              <span className="font-bold">Full Marks (Attempted): {paper.totalMarks} · Offered: 102 Marks</span>
             </div>
           </div>
 
@@ -110,12 +110,13 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
             <p className="font-bold text-slate-900">General Instructions:</p>
             {isBenchmark ? (
               <>
-                <p>1. This question paper comprises 4 Sections: Section A (20 Marks), Section B (20 Marks), Section C (15 Marks), and Section D (15 Marks). Total attempted marks = 70.</p>
-                <p>2. In Section A, Question 1 (MCQ), Question 2 (True/False), Question 3 (Fill in the blanks), and Question 4 (One Word/Sentence) each offer 7 questions: answer any 5 from each [1 mark each].</p>
-                <p>3. In Section B, answer any 10 questions out of 12 [2 marks each].</p>
-                <p>4. In Section C, answer any 5 questions out of 7 [3 marks each].</p>
-                <p>5. In Section D, answer any 3 questions out of 4 [5 marks each].</p>
-                <p>6. Show all necessary rough calculations, working steps, intermediate reasoning, and units clearly on your answer script.</p>
+                <p>1. This question paper comprises: Section A (20 Marks), Section B (14 Marks), Section C (18 Marks), Section D (12 Marks), and Question 8 (6 Marks). Full Attempted Marks = 70 (Total Offered Marks = 102 across 52 question blocks; students attempt 37 blocks).</p>
+                <p>2. In Section A, Question 1 (MCQ), Question 2 (True/False), Question 3 (Fill in the blanks), and Question 4 (One Word/Sentence) each offer 7 questions: answer any 5 from each [1 mark each, 5 marks per group, Section A = 20 Marks].</p>
+                <p>3. In Section B, answer any 7 questions out of 9 [2 marks each, Attempted = 14 Marks, Offered = 18 Marks].</p>
+                <p>4. In Section C, answer any 6 questions out of 8 [3 marks each, Attempted = 18 Marks, Offered = 24 Marks].</p>
+                <p>5. In Section D, answer any 3 questions out of 5 [4 marks each, Attempted = 12 Marks, Offered = 20 Marks].</p>
+                <p>6. In Question 8, answer any 1 question out of 2 [6 marks each, Attempted = 6 Marks, Offered = 12 Marks].</p>
+                <p>7. Show all necessary rough calculations, working steps, intermediate reasoning, and units clearly on your answer script.</p>
               </>
             ) : (
               <>
@@ -212,9 +213,9 @@ export const PrintExamPaperModal: React.FC<PrintExamPaperModalProps> = ({
                                   {qItem?.question_text || `[Slot #${slot.slotNumber} (${slot.chapterTitle}) generating...]`}
                                 </p>
 
-                                {slot.subparts && slot.subparts.length > 0 && (
+                                {slot.subparts && slot.subparts.length > 0 && slot.subparts.some((s) => s.text) && (
                                   <div className="space-y-1 mt-1.5 pl-2 border-l border-slate-300 font-sans text-xs">
-                                    {slot.subparts.map((sub, subIdx) => (
+                                    {slot.subparts.filter((s) => s.text).map((sub, subIdx) => (
                                       <div key={subIdx} className="flex items-center justify-between text-slate-800">
                                         <span>{sub.label} {sub.text}</span>
                                         <span className="font-semibold">[{sub.marks}]</span>
