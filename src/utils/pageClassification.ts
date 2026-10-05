@@ -1,23 +1,15 @@
-import { PageCoverageRecord } from '../types';
+import { PageCoverageRecord, TextQualityStatus } from '../types';
+import { evaluateTextQuality } from './textQuality';
 
 /**
- * Canonical classification for physical PDF page coverage.
+ * Canonical classification for physical PDF page coverage with Hybrid OCR support.
  *
- * READ:
- *   characterCount >= 150 AND wordCount >= 20
+ * READ (Usable Text):
+ *   native_good (characterCount >= 150 AND wordCount >= 20 without garbled encoding)
+ *   OR successful OCR transcribed text
  *
- * LOW_TEXT:
- *   characterCount >= 20 but does not satisfy READ
- *
- * EMPTY:
- *   characterCount < 20
- *
- * FAILED:
- *   only when actual extraction failure is known.
- *
- * hasUsableText = extractionStatus === "read"
- * Pages Successfully Read = count(extractionStatus === "read")
- * Pages Needing Attention = count(low_text + empty + failed)
+ * LOW_TEXT / ATTENTION:
+ *   native_low_text, native_garbled, empty, image_only, or ocr_failed
  *
  * Guarantee: Mutually exclusive groups.
  * Successfully Read + Needs Attention = Total Physical PDF Pages
@@ -26,7 +18,12 @@ import { PageCoverageRecord } from '../types';
 export function classifyPageCoverage(
   pageNumber: number,
   rawText?: string | null,
-  isFailed?: boolean
+  isFailed?: boolean,
+  ocrResult?: {
+    text: string;
+    status: 'ocr_success' | 'ocr_failed';
+    errorReason?: string;
+  }
 ): PageCoverageRecord {
   if (isFailed) {
     return {
@@ -36,36 +33,108 @@ export function classifyPageCoverage(
       hasUsableText: false,
       extractionStatus: 'failed',
       flagReason: 'Page extraction failed during PDF parsing or file was unreadable.',
+      nativeText: '',
+      nativeCharacterCount: 0,
+      nativeWordCount: 0,
+      textQualityScore: 0,
+      textQualityStatus: 'image_only',
+      requiresOcr: true,
+      finalText: '',
+      extractionMethod: 'native',
+      ocrStatus: 'none',
     };
   }
 
-  const cleanText = rawText ? rawText.trim() : '';
-  const characterCount = cleanText.length;
-  const words = cleanText ? cleanText.split(/\s+/).filter(Boolean) : [];
-  const wordCount = words.length;
+  const cleanNative = rawText ? rawText.trim() : '';
+  const nativeCharCount = cleanNative.length;
+  const nativeWords = cleanNative ? cleanNative.split(/\s+/).filter(Boolean) : [];
+  const nativeWordCount = nativeWords.length;
 
-  let extractionStatus: 'read' | 'low_text' | 'empty' | 'failed';
-  let flagReason: string | undefined = undefined;
+  const quality = evaluateTextQuality(cleanNative);
 
-  if (characterCount < 20) {
-    extractionStatus = 'empty';
-    flagReason = 'No extractable text detected — page may contain scanned text, illustrations, blank page, or full-page geometry diagram.';
-  } else if (characterCount >= 150 && wordCount >= 20) {
-    extractionStatus = 'read';
-  } else {
-    extractionStatus = 'low_text';
-    flagReason = 'Low text detected — page may contain mathematical diagrams, formulas, tables, or section headers only.';
+  // If OCR result is provided, merge it authoritatively (Requirement 7)
+  if (ocrResult) {
+    if (ocrResult.status === 'ocr_success' && ocrResult.text.trim().length > 0) {
+      const cleanOcr = ocrResult.text.trim();
+      const ocrChars = cleanOcr.length;
+      const ocrWords = cleanOcr.split(/\s+/).filter(Boolean).length;
+      const hasUsable = ocrChars >= 40 || ocrWords >= 10;
+
+      return {
+        pageNumber,
+        characterCount: ocrChars,
+        wordCount: ocrWords,
+        hasUsableText: hasUsable,
+        extractionStatus: hasUsable ? 'read' : 'low_text',
+        flagReason: hasUsable ? undefined : 'OCR extracted short formula/diagram content.',
+        nativeText: cleanNative,
+        nativeCharacterCount: nativeCharCount,
+        nativeWordCount: nativeWordCount,
+        textQualityScore: Math.min(100, Math.max(80, Math.round((ocrChars / 150) * 100))),
+        textQualityStatus: 'ocr_success',
+        requiresOcr: false,
+        finalText: cleanOcr,
+        extractionMethod: 'ocr',
+        ocrStatus: 'success',
+      };
+    } else {
+      return {
+        pageNumber,
+        characterCount: nativeCharCount,
+        wordCount: nativeWordCount,
+        hasUsableText: false,
+        extractionStatus: 'failed',
+        flagReason: ocrResult.errorReason || 'OCR transcription failed for this physical page.',
+        nativeText: cleanNative,
+        nativeCharacterCount: nativeCharCount,
+        nativeWordCount: nativeWordCount,
+        textQualityScore: quality.score,
+        textQualityStatus: 'ocr_failed',
+        requiresOcr: true,
+        finalText: quality.status === 'native_garbled' ? '' : cleanNative,
+        extractionMethod: 'ocr',
+        ocrStatus: 'failed',
+        ocrErrorReason: ocrResult.errorReason,
+      };
+    }
   }
 
-  const hasUsableText = extractionStatus === 'read';
+  // Native classification based on text quality analysis
+  let extractionStatus: 'read' | 'low_text' | 'empty' | 'failed';
+  let hasUsableText = false;
+
+  if (quality.status === 'image_only') {
+    extractionStatus = 'empty';
+    hasUsableText = false;
+  } else if (quality.status === 'native_garbled') {
+    // Corrupted legacy encoding must NEVER be counted as successfully read!
+    extractionStatus = 'low_text';
+    hasUsableText = false;
+  } else if (quality.status === 'native_good') {
+    extractionStatus = 'read';
+    hasUsableText = true;
+  } else {
+    // native_low_text
+    extractionStatus = 'low_text';
+    hasUsableText = false;
+  }
 
   return {
     pageNumber,
-    characterCount,
-    wordCount,
+    characterCount: nativeCharCount,
+    wordCount: nativeWordCount,
     hasUsableText,
     extractionStatus,
-    flagReason,
+    flagReason: quality.flagReason,
+    nativeText: cleanNative,
+    nativeCharacterCount: nativeCharCount,
+    nativeWordCount: nativeWordCount,
+    textQualityScore: quality.score,
+    textQualityStatus: quality.status,
+    requiresOcr: quality.requiresOcr,
+    finalText: quality.status === 'native_garbled' ? '' : cleanNative,
+    extractionMethod: 'native',
+    ocrStatus: 'none',
   };
 }
 
@@ -82,15 +151,34 @@ export function computePageCoverageSummary(
   coveragePercentage: number;
   totalExtractedChars: number;
   approxTotalWords: number;
+  nativeGoodCount: number;
+  nativeGarbledCount: number;
+  nativeLowTextCount: number;
+  imageOnlyCount: number;
+  ocrProcessedCount: number;
+  ocrSuccessfulCount: number;
+  ocrFallbackMode: boolean;
 } {
   const totalPhysicalPages = records.length > 0 ? records.length : (fallbackTotalPages || 1);
-  const usablePagesCount = records.filter((r) => r.extractionStatus === 'read').length;
-  const attentionPagesCount = records.filter((r) => r.extractionStatus !== 'read').length;
+  const usablePagesCount = records.filter((r) => r.hasUsableText).length;
+  const attentionPagesCount = records.filter((r) => !r.hasUsableText).length;
   const totalExtractedChars = records.reduce((sum, r) => sum + r.characterCount, 0);
   const approxTotalWords = records.reduce((sum, r) => sum + r.wordCount, 0);
   const coveragePercentage = totalPhysicalPages > 0
     ? Number(((usablePagesCount / totalPhysicalPages) * 100).toFixed(1))
     : 100;
+
+  const nativeGoodCount = records.filter((r) => r.textQualityStatus === 'native_good').length;
+  const nativeGarbledCount = records.filter((r) => r.textQualityStatus === 'native_garbled').length;
+  const nativeLowTextCount = records.filter((r) => r.textQualityStatus === 'native_low_text').length;
+  const imageOnlyCount = records.filter((r) => r.textQualityStatus === 'image_only').length;
+  const ocrProcessedCount = records.filter((r) => r.extractionMethod === 'ocr' || r.ocrStatus === 'success' || r.ocrStatus === 'failed').length;
+  const ocrSuccessfulCount = records.filter((r) => r.ocrStatus === 'success').length;
+
+  // OCR Fallback mode triggers if garbled + image_only pages form > 30% of total pages or if more than 10 pages are garbled
+  const ocrFallbackMode =
+    (nativeGarbledCount + imageOnlyCount) > (totalPhysicalPages * 0.3) ||
+    nativeGarbledCount >= 10;
 
   return {
     totalPhysicalPages,
@@ -99,5 +187,12 @@ export function computePageCoverageSummary(
     coveragePercentage,
     totalExtractedChars,
     approxTotalWords,
+    nativeGoodCount,
+    nativeGarbledCount,
+    nativeLowTextCount,
+    imageOnlyCount,
+    ocrProcessedCount,
+    ocrSuccessfulCount,
+    ocrFallbackMode,
   };
 }

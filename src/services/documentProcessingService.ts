@@ -1,12 +1,12 @@
 import { DocumentItem, PipelineStep } from '../types';
 import { chapterDetectionService } from './chapterDetectionService';
 import { storageService } from './storageService';
-import { classifyPageCoverage } from '../utils/pageClassification';
+import { classifyPageCoverage, computePageCoverageSummary } from '../utils/pageClassification';
 
 export const PIPELINE_STEPS: { step: number; name: string; description: string }[] = [
   { step: 1, name: 'File uploaded', description: 'Verifying PDF structure and integrity' },
   { step: 2, name: 'Text extracted', description: 'Parsing textual layers across all pages' },
-  { step: 3, name: 'Pages identified', description: 'Cataloging page boundaries and text coverage' },
+  { step: 3, name: 'Quality audited', description: 'Evaluating font encoding and text quality' },
   { step: 4, name: 'Chapters detected', description: 'Identifying chapter headers and units' },
   { step: 5, name: 'Topics detected', description: 'Extracting subtopics and learning objectives' },
   { step: 6, name: 'Knowledge indexed', description: 'Creating semantic chunk embeddings' },
@@ -16,6 +16,7 @@ export const PIPELINE_STEPS: { step: number; name: string; description: string }
 export class DocumentProcessingService {
   /**
    * Processes a PDF file through the 7-stage pipeline.
+   * Supports Hybrid OCR fallback when native text is corrupted or image-based.
    */
   public async processPdf(
     file: File,
@@ -38,10 +39,10 @@ export class DocumentProcessingService {
 
     // Step 1: File uploaded
     updateStep(0, 'in_progress');
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 500));
     updateStep(0, 'completed');
 
-    // Step 2: Text extracted
+    // Step 2: Text extracted (Native first choice)
     updateStep(1, 'in_progress');
     let extractedPages: { pageNumber: number; text: string }[] = [];
     let pageCount = 0;
@@ -49,6 +50,7 @@ export class DocumentProcessingService {
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('documentId', docId);
 
       const res = await fetch('/api/extract-pdf', {
         method: 'POST',
@@ -58,81 +60,100 @@ export class DocumentProcessingService {
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         updateStep(1, 'failed');
-        throw new Error(
-          errData.error ||
-            'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.'
-        );
+        throw new Error(errData.error || 'Failed to extract text from PDF.');
       }
 
       const data = await res.json();
       extractedPages = data.pages || [];
-      pageCount = data.pageCount || extractedPages.length;
+      pageCount = data.pageCount || extractedPages.length || 1;
     } catch (e: any) {
       updateStep(1, 'failed');
-      throw new Error(
-        e.message ||
-          'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.'
-      );
+      throw e;
     }
 
-    const totalExtractedChars = extractedPages.reduce(
-      (sum, p) => sum + (p.text ? p.text.trim().length : 0),
-      0
-    );
-
-    if (
-      extractedPages.length === 0 ||
-      totalExtractedChars < 50 ||
-      totalExtractedChars / Math.max(1, extractedPages.length) < 15
-    ) {
-      updateStep(1, 'failed');
-      throw new Error(
-        'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.'
-      );
-    }
-
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 400));
     updateStep(1, 'completed');
 
-    // Step 3: Pages identified & Page-level coverage check
+    // Step 3: Quality audited & Page-level coverage check
     updateStep(2, 'in_progress');
     // Save physical pages to storage for subsequent verification and re-indexing
     storageService.saveDocumentPages(docId, extractedPages);
 
-    // Compute deterministic page-level coverage check using canonical classification
+    // Compute deterministic page-level coverage check using canonical classification & quality signals
     let totalExtractedWords = 0;
-
     const pageCoverageRecords = extractedPages.map((p) => {
       const record = classifyPageCoverage(p.pageNumber, p.text);
       totalExtractedWords += record.wordCount;
       return record;
     });
 
-    const usablePagesCount = pageCoverageRecords.filter((r) => r.extractionStatus === 'read').length;
-    const attentionPagesCount = pageCoverageRecords.filter((r) => r.extractionStatus !== 'read').length;
-
+    const summary = computePageCoverageSummary(pageCoverageRecords, pageCount);
     storageService.savePageCoverage(docId, pageCoverageRecords);
-    const coveragePercentage = Number(((usablePagesCount / Math.max(1, pageCount)) * 100).toFixed(1));
 
     // Basic script / language identification
-    const allSampleText = extractedPages.slice(0, 10).map((p) => p.text).join(' ');
+    const allSampleText = extractedPages.slice(0, 15).map((p) => p.text).join(' ');
     const bengaliMatches = allSampleText.match(/[\u0980-\u09FF]/g);
     const hindiMatches = allSampleText.match(/[\u0900-\u097F]/g);
     let detectedLanguage: DocumentItem['language'] = 'Not yet verified';
-    if (bengaliMatches && bengaliMatches.length > 50) {
+    if (bengaliMatches && bengaliMatches.length > 40) {
       detectedLanguage = 'Bengali';
-    } else if (hindiMatches && hindiMatches.length > 50) {
+    } else if (hindiMatches && hindiMatches.length > 40) {
       detectedLanguage = 'Hindi';
     } else if (/[a-zA-Z]{50,}/.test(allSampleText)) {
       detectedLanguage = 'English';
+    } else if (summary.nativeGarbledCount > 3) {
+      // Suspected Bengali with legacy font corruption
+      detectedLanguage = 'Bengali';
     }
 
     await new Promise((r) => setTimeout(r, 500));
+    const bookTitle = file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
+
+    // Requirement 3 & 10: Document-level OCR decision
+    // If the majority are garbled/image-based: switch document processing to OCR FALLBACK MODE
+    // Do NOT attempt final chapter detection using corrupted native text!
+    if (summary.ocrFallbackMode) {
+      updateStep(2, 'failed'); // Marks quality step as requiring attention
+      updateStep(3, 'pending');
+      updateStep(4, 'pending');
+      updateStep(5, 'pending');
+
+      const fallbackDoc: DocumentItem = {
+        id: docId,
+        user_id: 'teacher-101',
+        title: bookTitle,
+        file_name: file.name,
+        file_size: file.size,
+        page_count: pageCount,
+        language: detectedLanguage,
+        status: 'needs_review',
+        processing_step: 3,
+        detected_chapters_count: 0,
+        teacher_confirmed: false,
+        total_extracted_chars: summary.totalExtractedChars,
+        total_words: summary.approxTotalWords,
+        usable_pages_count: summary.usablePagesCount,
+        attention_pages_count: summary.attentionPagesCount,
+        coverage_percentage: summary.coveragePercentage,
+        ocr_fallback_mode: true,
+        native_good_pages_count: summary.nativeGoodCount,
+        native_garbled_pages_count: summary.nativeGarbledCount,
+        native_low_text_pages_count: summary.nativeLowTextCount,
+        image_only_pages_count: summary.imageOnlyCount,
+        ocr_processed_pages_count: 0,
+        ocr_successful_pages_count: 0,
+        created_at: new Date().toISOString(),
+      };
+
+      storageService.saveDocument(fallbackDoc);
+      updateStep(6, 'completed');
+      return fallbackDoc;
+    }
+
     updateStep(2, 'completed');
 
     // Step 4: Chapters detected
     updateStep(3, 'in_progress');
-    const bookTitle = file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
     const detectionResult = await chapterDetectionService.detectChapters(
       docId,
       extractedPages,
@@ -155,7 +176,6 @@ export class DocumentProcessingService {
 
     // Step 6: Knowledge indexed
     updateStep(5, 'in_progress');
-    // Save detected chapters, topics, and knowledge chunks
     detectionResult.chapters.forEach((c) => storageService.saveChapter(c));
     detectionResult.topics.forEach((t) => storageService.saveTopic(t));
     detectionResult.chunks.forEach((chk) => storageService.saveChunk(chk));
@@ -172,15 +192,22 @@ export class DocumentProcessingService {
       file_size: file.size,
       page_count: pageCount,
       language: detectedLanguage,
-      status: needsReview ? 'needs_review' : 'needs_review', // All real books require teacher verification and confirmation
+      status: 'needs_review',
       processing_step: 7,
       detected_chapters_count: detectionResult.chapters.length,
-      teacher_confirmed: false, // Locked until teacher confirms mapping!
-      total_extracted_chars: totalExtractedChars,
-      total_words: totalExtractedWords,
-      usable_pages_count: usablePagesCount,
-      attention_pages_count: attentionPagesCount,
-      coverage_percentage: coveragePercentage,
+      teacher_confirmed: false,
+      total_extracted_chars: summary.totalExtractedChars,
+      total_words: summary.approxTotalWords,
+      usable_pages_count: summary.usablePagesCount,
+      attention_pages_count: summary.attentionPagesCount,
+      coverage_percentage: summary.coveragePercentage,
+      ocr_fallback_mode: false,
+      native_good_pages_count: summary.nativeGoodCount,
+      native_garbled_pages_count: summary.nativeGarbledCount,
+      native_low_text_pages_count: summary.nativeLowTextCount,
+      image_only_pages_count: summary.imageOnlyCount,
+      ocr_processed_pages_count: 0,
+      ocr_successful_pages_count: 0,
       created_at: new Date().toISOString(),
     };
 

@@ -33,6 +33,15 @@ export interface User {
   created_at: string;
 }
 
+export type TextQualityStatus =
+  | 'native_good'
+  | 'native_low_text'
+  | 'native_garbled'
+  | 'image_only'
+  | 'ocr_pending'
+  | 'ocr_success'
+  | 'ocr_failed';
+
 export interface PageCoverageRecord {
   pageNumber: number;
   characterCount: number;
@@ -40,6 +49,17 @@ export interface PageCoverageRecord {
   hasUsableText: boolean;
   extractionStatus: 'read' | 'low_text' | 'empty' | 'failed';
   flagReason?: string;
+  // Hybrid OCR fields
+  nativeText?: string;
+  nativeCharacterCount?: number;
+  nativeWordCount?: number;
+  textQualityScore?: number; // 0-100
+  textQualityStatus?: TextQualityStatus;
+  requiresOcr?: boolean;
+  finalText?: string;
+  extractionMethod?: 'native' | 'ocr';
+  ocrStatus?: 'none' | 'pending' | 'success' | 'failed';
+  ocrErrorReason?: string;
 }
 
 export interface ChapterProcessingReport {
@@ -81,6 +101,14 @@ export interface DocumentItem {
   attention_pages_count?: number;
   coverage_percentage?: number;
   created_at: string;
+  // Hybrid OCR summary fields
+  ocr_fallback_mode?: boolean;
+  native_good_pages_count?: number;
+  native_garbled_pages_count?: number;
+  native_low_text_pages_count?: number;
+  image_only_pages_count?: number;
+  ocr_processed_pages_count?: number;
+  ocr_successful_pages_count?: number;
 }
 
 export interface Chapter {
@@ -132,6 +160,7 @@ export interface QuestionSource {
   is_real_pdf_grounded?: boolean;
   ai_source_excerpt?: string;
   is_excerpt_matched?: boolean;
+  extraction_method?: 'native' | 'ocr';
 }
 
 export interface AnswerItem {

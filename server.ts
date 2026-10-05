@@ -13,13 +13,16 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 40 * 1024 * 1024 }, // 40MB
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB to support large 59MB textbooks
 });
+
+// Cache for uploaded PDFs to support client-side page rendering and OCR without memory bloat
+const pdfStorageMap = new Map<string, { buffer: Buffer; fileName: string; mimeType: string; timestamp: number }>();
 
 // Initialize Gemini SDK with server environment variable and required header
 const apiKey = process.env.GEMINI_API_KEY;
@@ -218,13 +221,21 @@ Formulate ONE high quality, syllabus-accurate question strictly derived from the
  * Endpoint: POST /api/extract-pdf
  * Extracts text and pages from uploaded PDF using REAL per-page physical extraction.
  * Never estimates page text by character position.
- * Rejects scanned / image-only PDFs with OCR requirement message.
+ * Caches PDF buffer to support subsequent on-demand multimodal OCR without re-uploading.
  */
 app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No PDF file was provided.' });
     }
+
+    const docId = (req.body.documentId as string) || `doc-${Date.now()}`;
+    pdfStorageMap.set(docId, {
+      buffer: req.file.buffer,
+      fileName: req.file.originalname,
+      mimeType: req.file.mimetype || 'application/pdf',
+      timestamp: Date.now(),
+    });
 
     // Real per-page extraction via pdfjs-dist
     const uint8Array = new Uint8Array(req.file.buffer);
@@ -257,29 +268,136 @@ app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Re
       });
     }
 
-    // Scanned / Image-Based PDF Detection:
-    // If total text across all pages is negligible (< 50 chars) or average per page < 15 chars
-    if (totalExtractedChars < 50 || totalExtractedChars / Math.max(1, numPages) < 15) {
-      return res.status(422).json({
-        success: false,
-        error:
-          'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.',
-      });
-    }
-
     return res.json({
       success: true,
+      documentId: docId,
       pageCount: numPages,
       pages: pageChunks,
       totalExtractedChars,
+      isLowText: totalExtractedChars < 50 || totalExtractedChars / Math.max(1, numPages) < 15,
     });
   } catch (error: any) {
     console.error('Error parsing PDF with pdfjs-dist:', error);
     return res.status(500).json({
       error:
-        'We could not reliably extract text from this PDF. It may be scanned or image-based. OCR is required.',
+        'We could not reliably extract text from this PDF. It may be corrupted or unreadable.',
       details: error.message,
     });
+  }
+});
+
+/**
+ * Endpoint: GET /api/document-pdf/:id
+ * Streams the cached PDF binary to the client for page rendering and multimodal OCR
+ */
+app.get('/api/document-pdf/:id', (req: Request, res: Response) => {
+  const cached = pdfStorageMap.get(req.params.id);
+  if (!cached) {
+    return res.status(404).json({ error: 'PDF file not found in server cache.' });
+  }
+  res.setHeader('Content-Type', cached.mimeType);
+  res.setHeader('Content-Disposition', `inline; filename="${cached.fileName}"`);
+  return res.send(cached.buffer);
+});
+
+/**
+ * Endpoint: POST /api/ocr-pages
+ * Multimodal Gemini 3.8 Flash OCR Fallback for Bengali and Mathematics.
+ * Transcribes verbatim visible textbook text, equations, and numbers without summarization.
+ */
+app.post('/api/ocr-pages', async (req: Request, res: Response) => {
+  try {
+    if (!aiClient) {
+      return res.status(503).json({ error: 'Gemini OCR transcription service is currently unavailable.' });
+    }
+
+    const { pages, language } = req.body;
+    if (!Array.isArray(pages) || pages.length === 0) {
+      return res.status(400).json({ error: 'No pages provided for OCR processing.' });
+    }
+
+    const targetLang = language || 'Bengali';
+    const results: {
+      pageNumber: number;
+      extractionMethod: 'ocr_gemini';
+      detectedLanguage: string;
+      text: string;
+      status: 'ocr_success' | 'ocr_failed';
+      errorReason?: string;
+    }[] = [];
+
+    for (const pageItem of pages) {
+      const { pageNumber, imageBase64 } = pageItem;
+      if (!imageBase64) {
+        results.push({
+          pageNumber,
+          extractionMethod: 'ocr_gemini',
+          detectedLanguage: targetLang,
+          text: '',
+          status: 'ocr_failed',
+          errorReason: 'Missing image data for page',
+        });
+        continue;
+      }
+
+      const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
+
+      try {
+        const response = await aiClient.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: [
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: cleanBase64,
+              },
+            },
+            {
+              text: `You are an accurate, verbatim OCR transcription engine for an Indian school textbook (${targetLang} and Mathematics).
+Transcribe ALL text, headings, problem numbers, and mathematical equations visible on this physical textbook page verbatim.
+
+Strict Transcription Rules:
+1. Output authentic Unicode script (e.g. বাংলা ইউনিকোড for Bengali).
+2. Preserve all numbers (Bengali numerals ১, ২, ৩... or English digits 1, 2, 3...) and mathematical expressions (+, -, ×, ÷, =, <, >, fractions a/b, decimals, geometry symbols).
+3. Preserve textbook structure: chapter titles, exercise numbers (e.g., নিজে করি ১.১, কষে দেখি ২), and question numbering.
+4. DO NOT summarize.
+5. DO NOT solve any exercises or problems.
+6. DO NOT invent, hallucinate, or add text not visible on the page.
+7. DO NOT infer missing content. If a word or diagram label is completely illegible, mark it as [অস্পষ্ট].
+Return ONLY the transcribed text of the page. Do not include markdown intro or conversational chat.`,
+            },
+          ],
+          config: {
+            temperature: 0.1,
+          },
+        });
+
+        const transcribed = response.text?.trim() || '';
+        results.push({
+          pageNumber,
+          extractionMethod: 'ocr_gemini',
+          detectedLanguage: targetLang,
+          text: transcribed,
+          status: transcribed.length > 0 ? 'ocr_success' : 'ocr_failed',
+          errorReason: transcribed.length === 0 ? 'Empty OCR output from vision model' : undefined,
+        });
+      } catch (pageErr: any) {
+        console.error(`OCR failed for page ${pageNumber}:`, pageErr.message);
+        results.push({
+          pageNumber,
+          extractionMethod: 'ocr_gemini',
+          detectedLanguage: targetLang,
+          text: '',
+          status: 'ocr_failed',
+          errorReason: pageErr.message || 'Vision transcription failed',
+        });
+      }
+    }
+
+    return res.json({ success: true, results });
+  } catch (error: any) {
+    console.error('Error in /api/ocr-pages:', error);
+    return res.status(500).json({ error: error.message || 'Server error during OCR processing.' });
   }
 });
 
