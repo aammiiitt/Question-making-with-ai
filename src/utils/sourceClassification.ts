@@ -139,3 +139,50 @@ export function classifySourceContent(
   // If ambiguous: do not guess. Return 'unknown'
   return 'unknown';
 }
+
+/**
+ * Detects the source language of a textbook from extracted physical pages.
+ * Uses script counts across approximately the first 40–50 pages:
+ * - Latin A–Z/a–z
+ * - Bengali Unicode (\u0980-\u09FF)
+ * - Devanagari (\u0900-\u097F)
+ *
+ * If Latin characters strongly dominate, classifies as English.
+ * Does NOT infer Bengali simply because some extracted glyphs look garbled.
+ */
+export function detectSourceLanguage(
+  pages: { pageNumber?: number; text: string }[]
+): 'English' | 'Bengali' | 'Hindi' | 'Not yet verified' {
+  if (!pages || pages.length === 0) return 'Not yet verified';
+
+  // Sample approximately first 40–50 pages
+  const samplePages = pages.slice(0, 50);
+  const sampleText = samplePages.map((p) => p.text || '').join(' ');
+
+  const latinMatches = sampleText.match(/[a-zA-Z]/g);
+  const bengaliMatches = sampleText.match(/[\u0980-\u09FF]/g);
+  const devanagariMatches = sampleText.match(/[\u0900-\u097F]/g);
+
+  const latinCount = latinMatches ? latinMatches.length : 0;
+  const bengaliCount = bengaliMatches ? bengaliMatches.length : 0;
+  const devanagariCount = devanagariMatches ? devanagariMatches.length : 0;
+
+  if (latinCount === 0 && bengaliCount === 0 && devanagariCount === 0) {
+    return 'Not yet verified';
+  }
+
+  // If Latin characters strongly dominate (or are greater than non-Latin scripts), classify as English
+  if (latinCount > bengaliCount && latinCount > devanagariCount) {
+    return 'English';
+  }
+
+  if (bengaliCount > latinCount && bengaliCount > devanagariCount) {
+    return 'Bengali';
+  }
+
+  if (devanagariCount > latinCount && devanagariCount > bengaliCount) {
+    return 'Hindi';
+  }
+
+  return latinCount > 0 ? 'English' : 'Not yet verified';
+}

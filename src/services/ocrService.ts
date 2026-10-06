@@ -188,7 +188,7 @@ export class OcrService {
             for (const ocrResult of data.results) {
               completedCount++;
               const prevRecord = currentRecordsMap.get(ocrResult.pageNumber);
-              const nativeText = prevRecord ? prevRecord.nativeText || '' : '';
+              const nativeText = prevRecord ? prevRecord.rawExtractedText || prevRecord.nativeText || '' : '';
 
               const updatedRecord = classifyPageCoverage(
                 ocrResult.pageNumber,
@@ -200,6 +200,11 @@ export class OcrService {
                   errorReason: ocrResult.errorReason,
                 }
               );
+
+              // Maintain chapterId if previously assigned
+              if (prevRecord?.chapterId) {
+                updatedRecord.chapterId = prevRecord.chapterId;
+              }
 
               currentRecordsMap.set(ocrResult.pageNumber, updatedRecord);
 
@@ -216,12 +221,15 @@ export class OcrService {
             completedCount++;
             failedCount++;
             const prevRecord = currentRecordsMap.get(item.pageNumber);
-            const nativeText = prevRecord ? prevRecord.nativeText || '' : '';
+            const nativeText = prevRecord ? prevRecord.rawExtractedText || prevRecord.nativeText || '' : '';
             const failedRecord = classifyPageCoverage(item.pageNumber, nativeText, false, {
               text: '',
               status: 'ocr_failed',
               errorReason: batchErr.message,
             });
+            if (prevRecord?.chapterId) {
+              failedRecord.chapterId = prevRecord.chapterId;
+            }
             currentRecordsMap.set(item.pageNumber, failedRecord);
           }
         }
@@ -235,10 +243,18 @@ export class OcrService {
         // Update stored document pages with the authoritative finalText
         const pagesForStorage = updatedList.map((r) => ({
           pageNumber: r.pageNumber,
-          text: r.finalText || '',
+          text: r.finalText || r.rawExtractedText || r.nativeText || '',
+          rawExtractedText: r.rawExtractedText || r.nativeText || '',
+          normalizedText: r.normalizedText,
           nativeText: r.nativeText,
           extractionMethod: r.extractionMethod,
+          extractionStatus: r.extractionStatus,
+          extractionConfidence: r.extractionConfidence,
+          validationFlags: r.validationFlags,
           textQualityStatus: r.textQualityStatus,
+          physicalPdfPage: r.physicalPdfPage || r.pageNumber,
+          printedPageNumber: r.printedPageNumber,
+          chapterId: r.chapterId,
         }));
         storageService.saveDocumentPages(docId, pagesForStorage);
 

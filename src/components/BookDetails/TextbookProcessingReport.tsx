@@ -18,6 +18,7 @@ import {
   X,
   Layers,
   HelpCircle,
+  Sparkles,
 } from 'lucide-react';
 import {
   DocumentItem,
@@ -25,9 +26,12 @@ import {
   Topic,
   KnowledgeChunk,
   PageCoverageRecord,
+  ChapterDetectionDiagnostics,
 } from '../../types';
 import { storageService } from '../../services/storageService';
 import { examPaperService } from '../../services/examPaperService';
+import { chapterDetectionService } from '../../services/chapterDetectionService';
+import { ocrService } from '../../services/ocrService';
 
 interface TextbookProcessingReportProps {
   document: DocumentItem;
@@ -46,33 +50,42 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
   onConfirmSuccess,
   onNavigateToExamBuilder,
 }) => {
-  // Page coverage records from storage
-  const pageRecords: PageCoverageRecord[] = storageService.getPageCoverage(document.id);
-  const rawPages = storageService.getDocumentPages(document.id);
+  // Page coverage records and cached pages from storage (reactive state)
+  const [pageRecords, setPageRecords] = useState<PageCoverageRecord[]>(() =>
+    storageService.getPageCoverage(document.id)
+  );
+  const [rawPages, setRawPages] = useState<any[]>(() =>
+    storageService.getDocumentPages(document.id)
+  );
 
-  // Editable chapter state
+  React.useEffect(() => {
+    setPageRecords(storageService.getPageCoverage(document.id));
+    setRawPages(storageService.getDocumentPages(document.id));
+  }, [document.id]);
+
+  // Editable chapter state: never fabricate placeholder Chapter 1 if 0 chapters exist
   const [editedChapters, setEditedChapters] = useState<Chapter[]>(() =>
-    chapters.length > 0
-      ? chapters.map((c) => ({ ...c }))
-      : [
-          {
-            id: `chap-${document.id}-1`,
-            document_id: document.id,
-            title: 'Chapter 1',
-            chapter_number: 1,
-            page_start: 1,
-            page_end: Math.min(20, document.page_count || 20),
-            status: 'needs_review',
-          },
-        ]
+    chapters.length > 0 ? chapters.map((c) => ({ ...c })) : []
   );
 
   // Sync when chapters prop changes
   React.useEffect(() => {
-    if (chapters.length > 0) {
-      setEditedChapters(chapters.map((c) => ({ ...c })));
-    }
+    setEditedChapters(chapters.map((c) => ({ ...c })));
   }, [chapters]);
+
+  // Diagnostics state
+  const [diagnostics, setDiagnostics] = useState<ChapterDetectionDiagnostics | null>(() =>
+    storageService.getChapterDiagnostics(document.id)
+  );
+
+  // Retry chapter detection state
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryMessage, setRetryMessage] = useState<string | null>(null);
+
+  // Gemini Vision recovery state
+  const [isRecoveringPage, setIsRecoveringPage] = useState<number | null>(null);
+  const [isRecoveringBatch, setIsRecoveringBatch] = useState(false);
+  const [recoveryProgress, setRecoveryProgress] = useState<string | null>(null);
 
   // Selected chapter for "VIEW PROCESSING SAMPLE" modal
   const [activeSampleChapter, setActiveSampleChapter] = useState<Chapter | null>(null);
@@ -97,25 +110,52 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
     storageService.saveDocument(updated);
   };
 
+  // Safe Hybrid OCR Recovery Handler
+  const handleRecoverPages = async (targetPages: number[]) => {
+    if (targetPages.length === 0) return;
+    setIsRecoveringBatch(true);
+    if (targetPages.length === 1) {
+      setIsRecoveringPage(targetPages[0]);
+    }
+    setRecoveryProgress(`Initializing Gemini Vision fallback for ${targetPages.length} page(s)...`);
+
+    try {
+      await ocrService.processOcr(
+        document,
+        `/api/document-pdf/${document.id}`,
+        targetPages,
+        (_curr, _tot, msg) => {
+          setRecoveryProgress(msg);
+        }
+      );
+
+      // Refresh records and pages from storage
+      const updatedRecs = storageService.getPageCoverage(document.id);
+      const updatedPgs = storageService.getDocumentPages(document.id);
+      setPageRecords(updatedRecs);
+      setRawPages(updatedPgs);
+      setRecoveryProgress(`Successfully recovered ${targetPages.length} page(s) with Gemini Vision.`);
+      setTimeout(() => setRecoveryProgress(null), 3500);
+    } catch (err: any) {
+      console.error('Vision recovery failed:', err);
+      setRecoveryProgress(`Vision recovery failed: ${err.message}`);
+    } finally {
+      setIsRecoveringBatch(false);
+      setIsRecoveringPage(null);
+    }
+  };
+
   // Document-level calculated numbers (never fabricated!)
   // Canonical Classification:
-  // READ: characterCount >= 150 AND wordCount >= 20
-  // LOW_TEXT: characterCount >= 20 but does not satisfy READ
-  // EMPTY: characterCount < 20
-  // FAILED: only when actual extraction failure is known
-  // hasUsableText = extractionStatus === "read"
-  // Mutually exclusive: Successfully Read (read) + Needing Attention (low_text + empty + failed) = Total Physical Pages
+  // hasUsableText = extractionStatus === "verified" || extractionStatus === "vision_recovered" || extractionStatus === "read"
+  // Mutually exclusive: Successfully Read (hasUsableText) + Needing Attention (!hasUsableText) = Total Physical Pages
   const totalPhysicalPages =
     pageRecords.length > 0 ? pageRecords.length : (document.page_count || rawPages.length || 1);
-  const usablePagesCount =
-    pageRecords.length > 0
-      ? pageRecords.filter((p) => p.extractionStatus === 'read').length
-      : (document.usable_pages_count ?? 0);
-  const attentionPages = pageRecords.filter((p) => p.extractionStatus !== 'read');
-  const attentionPagesCount =
-    pageRecords.length > 0
-      ? attentionPages.length
-      : (document.attention_pages_count ?? Math.max(0, totalPhysicalPages - usablePagesCount));
+  const usablePagesCount = pageRecords.filter((p) => p.hasUsableText).length;
+  const verifiedNativeCount = pageRecords.filter((p) => p.extractionStatus === 'verified').length;
+  const visionRecoveredCount = pageRecords.filter((p) => p.extractionStatus === 'vision_recovered').length;
+  const attentionPages = pageRecords.filter((p) => !p.hasUsableText);
+  const attentionPagesCount = attentionPages.length;
 
   const totalExtractedChars =
     document.total_extracted_chars ||
@@ -171,42 +211,36 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
       (p) =>
         p.pageNumber >= chap.page_start &&
         p.pageNumber <= chap.page_end &&
-        p.text &&
-        p.text.trim().length > 0
+        ((p.text && p.text.trim().length > 0) || (p.rawExtractedText && p.rawExtractedText.trim().length > 0))
     );
 
-    let beginningSample = 'No extractable text found in beginning physical pages.';
-    let middleSample = 'No extractable text found in middle physical pages.';
-    let endingSample = 'No extractable text found in ending physical pages.';
-    let begPageNum = chap.page_start;
-    let midPageNum = Math.floor((chap.page_start + chap.page_end) / 2);
-    let endPageNum = chap.page_end;
+    const getSampleForPage = (pageObj?: any, fallbackNum?: number) => {
+      const pageNum = pageObj?.pageNumber || fallbackNum || 1;
+      const rec = pageRecords.find((r) => r.pageNumber === pageNum);
+      const text = rec?.finalText || pageObj?.text?.trim() || rec?.rawExtractedText || pageObj?.rawExtractedText || '';
+      return {
+        pageNum,
+        printedNum: rec?.printedPageNumber ?? pageObj?.printedPageNumber ?? (pageNum >= 12 ? pageNum - 11 : undefined),
+        sampleText: text.slice(0, 600) || 'No extractable text found on this physical page.',
+        rawText: rec?.rawExtractedText || pageObj?.rawExtractedText || text,
+        extractionMethod: rec?.extractionMethod || pageObj?.extractionMethod || 'native_pdf',
+        extractionStatus: rec?.extractionStatus || pageObj?.extractionStatus || 'needs_review',
+        extractionConfidence: rec?.extractionConfidence ?? pageObj?.extractionConfidence ?? 0.5,
+        validationFlags: (rec?.validationFlags || pageObj?.validationFlags || []) as string[],
+        flagReason: rec?.flagReason || pageObj?.flagReason,
+        isTrustworthy: rec?.hasUsableText ?? pageObj?.isTrustworthy ?? false,
+      };
+    };
 
-    if (chapPages.length > 0) {
-      // Beginning: from first usable page
-      const firstP = chapPages[0];
-      beginningSample = firstP.text.trim().slice(0, 500);
-      begPageNum = firstP.pageNumber;
-
-      // Middle: from median page
-      const midIdx = Math.floor(chapPages.length / 2);
-      const midP = chapPages[midIdx];
-      middleSample = midP.text.trim().slice(0, 500);
-      midPageNum = midP.pageNumber;
-
-      // Ending: from last page
-      const lastP = chapPages[chapPages.length - 1];
-      endingSample = lastP.text.trim().slice(0, 500);
-      endPageNum = lastP.pageNumber;
-    }
+    const firstP = chapPages.length > 0 ? chapPages[0] : undefined;
+    const midIdx = chapPages.length > 0 ? Math.floor(chapPages.length / 2) : 0;
+    const midP = chapPages.length > 0 ? chapPages[midIdx] : undefined;
+    const lastP = chapPages.length > 0 ? chapPages[chapPages.length - 1] : undefined;
 
     return {
-      beginningSample,
-      middleSample,
-      endingSample,
-      begPageNum,
-      midPageNum,
-      endPageNum,
+      begSample: getSampleForPage(firstP, chap.page_start),
+      midSample: getSampleForPage(midP, Math.floor((chap.page_start + chap.page_end) / 2)),
+      endSample: getSampleForPage(lastP, chap.page_end),
     };
   };
 
@@ -337,19 +371,55 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
     }
   };
 
+  // Handler: Retry Chapter Detection reusing cached raw document pages
+  const handleRetryDetection = async () => {
+    setIsRetrying(true);
+    setRetryMessage(null);
+    setConfirmationError(null);
+    try {
+      const result = await chapterDetectionService.retryChapterDetection(document.id);
+      setEditedChapters(result.chapters);
+      if (result.diagnostics) {
+        setDiagnostics(result.diagnostics);
+      }
+      setDocumentLanguage(result.document.language);
+      setRetryMessage(
+        result.chapters.length > 0
+          ? `Retry complete: ${result.chapters.length} chapter(s) detected (${result.diagnostics?.mappingSource || 'deterministic'} scan).`
+          : 'Retry complete: No chapter headers detected in text layer. You can add chapters manually.'
+      );
+      if (onConfirmSuccess) {
+        onConfirmSuccess(result.document, result.chapters);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setConfirmationError(err.message || 'Retry chapter detection failed.');
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
   // Chapter-level statistics
   const chapterReports = editedChapters.map((chap) => {
     const rangePages = pageRecords.filter(
       (p) => p.pageNumber >= chap.page_start && p.pageNumber <= chap.page_end
     );
     const totalRange = Math.max(1, chap.page_end - chap.page_start + 1);
-    const usableInRange = rangePages.filter((p) => p.extractionStatus === 'read').length;
-    const attentionInRange = rangePages.filter((p) => p.extractionStatus !== 'read');
+    const usableInRange = rangePages.filter((p) => p.hasUsableText).length;
+    const attentionInRange = rangePages.filter((p) => !p.hasUsableText);
     const chapChunks = chunks.filter((c) => c.chapter_id === chap.id);
     const chapTopics = topics.filter((t) => t.chapter_id === chap.id);
     const wordsInRange = rangePages.reduce((s, p) => s + p.wordCount, 0);
 
-    const isCoverageGood = usableInRange / Math.max(1, totalRange) >= 0.85;
+    const hasAttention = attentionInRange.length > 0;
+    const hasVisionRecovered = rangePages.some((p) => p.extractionStatus === 'vision_recovered');
+
+    let status: 'verified' | 'vision_recovered' | 'verify' = 'verify';
+    if (!hasAttention && rangePages.length > 0) {
+      status = hasVisionRecovered ? 'vision_recovered' : 'verified';
+    } else {
+      status = 'verify';
+    }
 
     return {
       chap,
@@ -359,7 +429,7 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
       chapChunksCount: chapChunks.length,
       chapTopicsCount: chapTopics.length,
       wordsInRange,
-      status: isCoverageGood ? ('read' as const) : ('verify' as const),
+      status,
     };
   });
 
@@ -373,8 +443,14 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
               <span className="text-[11px] font-bold tracking-wider uppercase text-slate-500">
                 Audited Extraction Record
               </span>
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
-                Textbook processed and indexed
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
+                editedChapters.length === 0
+                  ? 'bg-amber-50 text-amber-900 border-amber-300'
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              }`}>
+                {editedChapters.length === 0
+                  ? 'Text extraction completed, but chapter mapping needs review.'
+                  : 'Textbook processed and indexed'}
               </span>
             </div>
             <h1 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight">
@@ -385,7 +461,17 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start md:self-auto">
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+            <button
+              type="button"
+              disabled={isRetrying}
+              onClick={handleRetryDetection}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-600 ${isRetrying ? 'animate-spin' : ''}`} />
+              <span>{isRetrying ? 'Scanning Pages...' : 'RETRY CHAPTER DETECTION'}</span>
+            </button>
+
             {isConfirmed ? (
               <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-100 text-emerald-900 text-xs font-bold border border-emerald-300">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -399,6 +485,13 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
             )}
           </div>
         </div>
+
+        {retryMessage && (
+          <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-800 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{retryMessage}</span>
+          </div>
+        )}
 
         {/* DOCUMENT-LEVEL SUMMARY (Exact Section 2 Requirement) */}
         <div>
@@ -416,6 +509,9 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
               <span className="font-extrabold text-emerald-800 text-base">
                 {usablePagesCount} / {totalPhysicalPages}
               </span>
+              <span className="block text-[10px] text-slate-500 mt-0.5">
+                {verifiedNativeCount} verified native{visionRecoveredCount > 0 ? `, ${visionRecoveredCount} vision` : ''}
+              </span>
             </div>
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
@@ -423,6 +519,11 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
               <span className={`font-extrabold text-base ${attentionPagesCount > 0 ? 'text-amber-700' : 'text-slate-900'}`}>
                 {attentionPagesCount}
               </span>
+              {attentionPagesCount > 0 && (
+                <span className="block text-[10px] text-amber-700 mt-0.5">
+                  Needs review or Vision OCR
+                </span>
+              )}
             </div>
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
@@ -446,7 +547,9 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
               <span className="text-slate-400 block text-[11px]">Detected Chapters</span>
-              <span className="font-semibold text-slate-800 text-sm">{editedChapters.length} Chapters</span>
+              <span className="font-semibold text-slate-800 text-sm">
+                {editedChapters.length === 0 ? '0 Chapters' : `${editedChapters.length} Chapters`}
+              </span>
             </div>
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
@@ -479,8 +582,18 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
               <span className="text-slate-400 block text-[11px]">Chapter Mapping Status</span>
-              <span className={`font-bold text-xs ${isConfirmed ? 'text-emerald-700' : 'text-amber-700'}`}>
-                {isConfirmed ? 'Verified & Confirmed' : 'Needs Teacher Verification'}
+              <span className={`font-bold text-xs ${
+                editedChapters.length === 0
+                  ? 'text-amber-700'
+                  : isConfirmed
+                  ? 'text-emerald-700'
+                  : 'text-amber-700'
+              }`}>
+                {editedChapters.length === 0
+                  ? 'Mapping not ready'
+                  : isConfirmed
+                  ? 'Verified & Confirmed'
+                  : 'Needs Teacher Verification'}
               </span>
             </div>
 
@@ -511,7 +624,99 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
             </div>
           </div>
         </div>
+
+        {/* Safe Hybrid Extraction Action Banner */}
+        {attentionPagesCount > 0 && (
+          <div className="mt-4 p-4 bg-purple-50/70 border border-purple-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <Sparkles className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-xs font-bold text-purple-950">
+                  Safe Hybrid Extraction Active · {attentionPagesCount} Page(s) Require Attention
+                </h3>
+                <p className="text-[11px] text-purple-800 mt-0.5 leading-relaxed">
+                  Native PDF parsing detected damaged fractions, non-standard symbols, or unverified font encodings.
+                  You can invoke Gemini Vision fallback to transcribe these pages verbatim with authentic math expressions.
+                </p>
+                {recoveryProgress && (
+                  <p className="text-xs font-semibold text-purple-700 mt-1.5 flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>{recoveryProgress}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={isRecoveringBatch}
+              onClick={() => handleRecoverPages(attentionPages.map((p) => p.pageNumber))}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles className={`w-4 h-4 ${isRecoveringBatch ? 'animate-spin' : ''}`} />
+              <span>{isRecoveringBatch ? 'Recovering Pages...' : `Recover All Attention Pages (${attentionPagesCount})`}</span>
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* CHAPTER DETECTION DIAGNOSTICS */}
+      {diagnostics && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <Layers className="w-4 h-4 text-slate-500" />
+              <span>Chapter Detection Diagnostics</span>
+            </h3>
+            <span className="text-xs text-slate-500">
+              Mapping Source: <strong className="font-mono text-slate-800">{diagnostics.mappingSource}</strong>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+              <span className="text-slate-400 block text-[10px]">Physical Pages Scanned</span>
+              <span className="font-bold text-slate-900 text-sm">{diagnostics.totalPagesScanned}</span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+              <span className="text-slate-400 block text-[10px]">Chapter Candidates</span>
+              <span className="font-bold text-slate-900 text-sm">{diagnostics.candidateHeadingsCount}</span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+              <span className="text-slate-400 block text-[10px]">TOC Candidate Pages</span>
+              <span className="font-bold text-slate-900 text-sm truncate">
+                {diagnostics.tocCandidatePages && diagnostics.tocCandidatePages.length > 0
+                  ? diagnostics.tocCandidatePages.join(', ')
+                  : 'None (Body Scan)'}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+              <span className="text-slate-400 block text-[10px]">Final Detected Chapters</span>
+              <span className="font-bold text-slate-900 text-sm">{diagnostics.finalChaptersCount}</span>
+            </div>
+          </div>
+
+          {diagnostics.first10CandidateHeadings && diagnostics.first10CandidateHeadings.length > 0 && (
+            <div className="pt-2">
+              <span className="text-[11px] font-bold text-slate-600 block mb-1.5">
+                First Chapter Candidate Markers:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {diagnostics.first10CandidateHeadings.map((c, i) => (
+                  <span
+                    key={i}
+                    className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-mono font-medium text-slate-800"
+                  >
+                    Ch {c.chapterNumber} @ PDF {c.physicalPage}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* GLOBAL COVERAGE WARNINGS (Section 6 Requirement) */}
       <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-5 space-y-3">
@@ -588,12 +793,30 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
             </span>
             <div className="flex flex-wrap gap-2">
               {attentionPages.slice(0, 15).map((p) => (
-                <span
+                <div
                   key={p.pageNumber}
-                  className="px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-800 text-[11px] font-semibold"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-800 text-[11px] font-semibold"
                 >
-                  PDF Page {p.pageNumber} — {p.extractionStatus === 'empty' ? 'No text' : 'Low text'} ({p.characterCount}c)
-                </span>
+                  <span>
+                    PDF Page {p.pageNumber}
+                    {p.printedPageNumber !== undefined ? ` (p.${p.printedPageNumber})` : ''} —{' '}
+                    {p.validationFlags && p.validationFlags.length > 0
+                      ? p.validationFlags[0].replace(/_/g, ' ')
+                      : p.extractionStatus === 'empty'
+                      ? 'No text'
+                      : 'Low text'}{' '}
+                    ({p.characterCount}c)
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isRecoveringBatch || isRecoveringPage === p.pageNumber}
+                    onClick={() => handleRecoverPages([p.pageNumber])}
+                    title="Recover with Gemini Vision"
+                    className="p-0.5 text-purple-600 hover:text-purple-800 cursor-pointer disabled:opacity-40"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                  </button>
+                </div>
               ))}
               {attentionPages.length > 15 && (
                 <span className="px-2.5 py-1 rounded-md text-slate-500 text-[11px]">
@@ -602,13 +825,13 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
               )}
             </div>
             <p className="text-[11px] text-slate-500 italic pt-1">
-              Possible reason: "These pages may contain scanned text, diagrams, mathematical notation, or image-based content."
+              Possible reason: "These pages may contain scanned text, diagrams, vertically broken fractions, or non-standard font encodings. Use Gemini Vision to transcribe them verbatim."
             </p>
           </div>
         ) : (
           <p className="text-xs text-emerald-800 bg-emerald-50 p-3 rounded-xl border border-emerald-200 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>All physical PDF pages have usable character content. No empty pages detected.</span>
+            <span>All physical PDF pages have verified usable character content. No damaged or unverified pages detected.</span>
           </p>
         )}
 
@@ -620,9 +843,10 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
                 <tr>
                   <th className="py-2 px-3">Physical PDF Page</th>
                   <th className="py-2 px-3">Character Count</th>
-                  <th className="py-2 px-3">Word Count</th>
+                  <th className="py-2 px-3">Method</th>
                   <th className="py-2 px-3">Extraction Status</th>
-                  <th className="py-2 px-3">Details / Reason</th>
+                  <th className="py-2 px-3">Details / Signal</th>
+                  <th className="py-2 px-3 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-800">
@@ -630,22 +854,42 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
                   <tr key={rec.pageNumber} className="hover:bg-slate-50/50">
                     <td className="py-2 px-3 font-bold text-slate-900">
                       Page {rec.pageNumber}
+                      {rec.printedPageNumber !== undefined ? (
+                        <span className="text-[10px] text-slate-400 font-normal ml-1">
+                          (p.{rec.printedPageNumber})
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2 px-3">{rec.characterCount} chars</td>
-                    <td className="py-2 px-3">~{rec.wordCount} words</td>
+                    <td className="py-2 px-3 font-mono text-[10px]">
+                      {rec.extractionMethod === 'vision' ? 'vision' : 'native_pdf'}
+                    </td>
                     <td className="py-2 px-3">
                       <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                        rec.extractionStatus === 'read'
+                        rec.extractionStatus === 'verified'
                           ? 'bg-emerald-100 text-emerald-800'
-                          : rec.extractionStatus === 'low_text'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-rose-100 text-rose-800'
+                          : rec.extractionStatus === 'vision_recovered'
+                          ? 'bg-sky-100 text-sky-800'
+                          : 'bg-amber-100 text-amber-800'
                       }`}>
                         {rec.extractionStatus.replace('_', ' ')}
                       </span>
                     </td>
                     <td className="py-2 px-3 text-[11px] text-slate-500">
-                      {rec.flagReason || 'Standard instructional/exercise text'}
+                      {rec.flagReason || (rec.validationFlags && rec.validationFlags.length > 0 ? rec.validationFlags.join(', ') : 'Verified text')}
+                    </td>
+                    <td className="py-2 px-3 text-center">
+                      {!rec.hasUsableText && (
+                        <button
+                          type="button"
+                          disabled={isRecoveringBatch || isRecoveringPage === rec.pageNumber}
+                          onClick={() => handleRecoverPages([rec.pageNumber])}
+                          className="p-1 text-purple-600 hover:text-purple-800 cursor-pointer disabled:opacity-40"
+                          title="Recover with Gemini Vision"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -685,125 +929,175 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
           </p>
         </div>
 
-        {/* Chapter Table */}
-        <div className="overflow-x-auto border border-slate-200 rounded-xl">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-600 font-bold border-b border-slate-200">
-              <tr>
-                <th className="py-2.5 px-3 w-10 text-center">#</th>
-                <th className="py-2.5 px-3 min-w-[180px]">Chapter Title</th>
-                <th className="py-2.5 px-3 w-28 text-center">Physical Start</th>
-                <th className="py-2.5 px-3 w-28 text-center">Physical End</th>
-                <th className="py-2.5 px-3 w-20 text-center">Pages</th>
-                <th className="py-2.5 px-3 w-28 text-center">Read / Attention</th>
-                <th className="py-2.5 px-3 w-20 text-center">Chunks</th>
-                <th className="py-2.5 px-3 w-24 text-center">Status</th>
-                <th className="py-2.5 px-3 w-40 text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-800">
-              {chapterReports.map((item, idx) => {
-                const chap = item.chap;
-                return (
-                  <tr key={chap.id || idx} className="hover:bg-slate-50/50">
-                    <td className="py-2.5 px-3 text-center font-bold text-slate-400">
-                      {idx + 1}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <input
-                        type="text"
-                        value={chap.title}
-                        onChange={(e) => handleUpdateChapter(idx, 'title', e.target.value)}
-                        className="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                      />
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      <input
-                        type="number"
-                        min={1}
-                        max={totalPhysicalPages}
-                        value={chap.page_start}
-                        onChange={(e) =>
-                          handleUpdateChapter(
-                            idx,
-                            'page_start',
-                            Math.max(1, parseInt(e.target.value) || 1)
-                          )
-                        }
-                        className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-xs font-bold text-center text-slate-900"
-                      />
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      <input
-                        type="number"
-                        min={chap.page_start}
-                        max={totalPhysicalPages}
-                        value={chap.page_end}
-                        onChange={(e) =>
-                          handleUpdateChapter(
-                            idx,
-                            'page_end',
-                            Math.max(chap.page_start, parseInt(e.target.value) || chap.page_start)
-                          )
-                        }
-                        className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-xs font-bold text-center text-slate-900"
-                      />
-                    </td>
-                    <td className="py-2.5 px-3 text-center font-semibold text-slate-700">
-                      {item.totalRange}p
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      <span className="font-semibold text-emerald-800">
-                        {item.usableInRange} / {item.totalRange}
-                      </span>
-                      {item.attentionInRange.length > 0 && (
-                        <span className="block text-[10px] text-amber-700 font-medium">
-                          {item.attentionInRange.length} flag
+        {/* Chapter Table or Empty State */}
+        {editedChapters.length === 0 ? (
+          <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+            <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
+            <div>
+              <h4 className="text-sm font-bold text-slate-900">0 Chapters Mapped · Mapping not ready</h4>
+              <p className="text-xs text-slate-600 mt-1">
+                No chapters mapped yet. Retry automatic detection or add chapters manually.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isRetrying}
+                onClick={handleRetryDetection}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isRetrying ? 'animate-spin' : ''}`} />
+                <span>RETRY CHAPTER DETECTION</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleAddChapter}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 transition-colors cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Chapter Manually</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-600 font-bold border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-3 w-10 text-center">#</th>
+                  <th className="py-2.5 px-3 min-w-[180px]">Chapter Title</th>
+                  <th className="py-2.5 px-3 w-28 text-center">Physical Start</th>
+                  <th className="py-2.5 px-3 w-28 text-center">Physical End</th>
+                  <th className="py-2.5 px-3 w-20 text-center">Pages</th>
+                  <th className="py-2.5 px-3 w-28 text-center">Read / Attention</th>
+                  <th className="py-2.5 px-3 w-20 text-center">Chunks</th>
+                  <th className="py-2.5 px-3 w-24 text-center">Status</th>
+                  <th className="py-2.5 px-3 w-40 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-800">
+                {chapterReports.map((item, idx) => {
+                  const chap = item.chap;
+                  return (
+                    <tr key={chap.id || idx} className="hover:bg-slate-50/50">
+                      <td className="py-2.5 px-3 text-center font-bold text-slate-400">
+                        {idx + 1}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <input
+                          type="text"
+                          value={chap.title}
+                          onChange={(e) => handleUpdateChapter(idx, 'title', e.target.value)}
+                          className="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <input
+                          type="number"
+                          min={1}
+                          max={totalPhysicalPages}
+                          value={chap.page_start}
+                          onChange={(e) =>
+                            handleUpdateChapter(
+                              idx,
+                              'page_start',
+                              Math.max(1, parseInt(e.target.value) || 1)
+                            )
+                          }
+                          className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-xs font-bold text-center text-slate-900"
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <input
+                          type="number"
+                          min={chap.page_start}
+                          max={totalPhysicalPages}
+                          value={chap.page_end}
+                          onChange={(e) =>
+                            handleUpdateChapter(
+                              idx,
+                              'page_end',
+                              Math.max(chap.page_start, parseInt(e.target.value) || chap.page_start)
+                            )
+                          }
+                          className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-xs font-bold text-center text-slate-900"
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-semibold text-slate-700">
+                        {item.totalRange}p
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="font-semibold text-emerald-800">
+                          {item.usableInRange} / {item.totalRange}
                         </span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3 text-center font-semibold text-slate-700">
-                      {item.chapChunksCount}
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                          item.status === 'read'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {item.status === 'read' ? 'READ ✓' : 'VERIFY ⚠'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-center space-x-1">
-                      {/* VIEW PROCESSING SAMPLE BUTTON */}
-                      <button
-                        type="button"
-                        onClick={() => setActiveSampleChapter(chap)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-[11px] transition-colors cursor-pointer"
-                        title="View Actual Extracted Excerpts"
-                      >
-                        <Eye className="w-3 h-3 text-slate-600" />
-                        <span>Preview</span>
-                      </button>
+                        {item.attentionInRange.length > 0 && (
+                          <span className="block text-[10px] text-amber-700 font-medium">
+                            {item.attentionInRange.length} flag
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-semibold text-slate-700">
+                        {item.chapChunksCount}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            item.status === 'verified'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : item.status === 'vision_recovered'
+                              ? 'bg-sky-100 text-sky-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {item.status === 'verified'
+                            ? 'VERIFIED ✓'
+                            : item.status === 'vision_recovered'
+                            ? 'VISION RECOVERED'
+                            : 'NEEDS REVIEW ⚠'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center space-x-1">
+                        {/* VIEW PROCESSING SAMPLE BUTTON */}
+                        <button
+                          type="button"
+                          onClick={() => setActiveSampleChapter(chap)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-[11px] transition-colors cursor-pointer"
+                          title="View Actual Extracted Excerpts"
+                        >
+                          <Eye className="w-3 h-3 text-slate-600" />
+                          <span>Preview</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveChapter(idx)}
-                        disabled={editedChapters.length <= 1}
-                        className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30 cursor-pointer"
-                        title="Remove chapter"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                        {item.attentionInRange.length > 0 && (
+                          <button
+                            type="button"
+                            disabled={isRecoveringBatch}
+                            onClick={() => handleRecoverPages(item.attentionInRange.map((p) => p.pageNumber))}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold text-[11px] transition-colors cursor-pointer border border-purple-200 disabled:opacity-50"
+                            title="Recover unverified pages in this chapter using Gemini Vision"
+                          >
+                            <Sparkles className="w-3 h-3 text-purple-600" />
+                            <span>Recover ({item.attentionInRange.length})</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveChapter(idx)}
+                          disabled={editedChapters.length <= 1}
+                          className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30 cursor-pointer"
+                          title="Remove chapter"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Confirmation error notice */}
         {confirmationError && (
@@ -826,18 +1120,20 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
         {/* Action Button: CONFIRM TEXTBOOK & CHAPTER MAPPING */}
         <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="text-xs text-slate-500">
-            {editedChapters.length} Chapters · Total verified range: Page {editedChapters[0]?.page_start || 1} to Page {editedChapters[editedChapters.length - 1]?.page_end || totalPhysicalPages}
+            {editedChapters.length} Chapters · {editedChapters.length === 0 ? 'Mapping not ready' : `Total verified range: Page ${editedChapters[0]?.page_start || 1} to Page ${editedChapters[editedChapters.length - 1]?.page_end || totalPhysicalPages}`}
           </div>
 
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={isConfirming}
+              disabled={isConfirming || editedChapters.length === 0}
               onClick={handleConfirmMapping}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer ${
-                isConfirmed
-                  ? 'bg-slate-900 text-white hover:bg-slate-800'
-                  : 'bg-emerald-700 text-white hover:bg-emerald-800'
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                editedChapters.length === 0
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                  : isConfirmed
+                  ? 'bg-slate-900 text-white hover:bg-slate-800 cursor-pointer'
+                  : 'bg-emerald-700 text-white hover:bg-emerald-800 cursor-pointer'
               }`}
             >
               {isConfirming ? (
@@ -877,6 +1173,82 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
         const samples = getChapterExcerpts(activeSampleChapter);
         const chapTopics = topics.filter((t) => t.chapter_id === activeSampleChapter.id);
 
+        const renderExcerptCard = (title: string, s: any) => {
+          const isRecovering = isRecoveringPage === s.pageNum;
+          return (
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-800">
+                <div>
+                  <span>{title}</span>
+                  <div className="text-[11px] font-semibold text-slate-500 mt-0.5">
+                    Physical PDF Page {s.pageNum}
+                    {s.printedNum !== undefined ? ` · Printed Page ${s.printedNum}` : ''}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                    s.extractionMethod === 'vision'
+                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                      : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    {s.extractionMethod === 'vision' ? 'Gemini Vision' : 'Native PDF'}
+                  </span>
+
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                    s.extractionStatus === 'verified'
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      : s.extractionStatus === 'vision_recovered'
+                      ? 'bg-sky-100 text-sky-800 border border-sky-200'
+                      : 'bg-amber-100 text-amber-800 border border-amber-200'
+                  }`}>
+                    {s.extractionStatus === 'verified'
+                      ? 'VERIFIED ✓'
+                      : s.extractionStatus === 'vision_recovered'
+                      ? 'VISION RECOVERED'
+                      : 'NEEDS REVIEW ⚠'}
+                  </span>
+
+                  <span className="text-[10px] text-slate-400 font-medium">
+                    ({Math.round((s.extractionConfidence || 0.5) * 100)}% conf)
+                  </span>
+                </div>
+              </div>
+
+              {s.validationFlags && s.validationFlags.length > 0 && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-900 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold">Text Quality Signal: </span>
+                    {s.flagReason || s.validationFlags.join(', ')}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-slate-700 leading-relaxed font-mono bg-white p-3 rounded-lg border border-slate-200 whitespace-pre-line max-h-48 overflow-y-auto">
+                {s.sampleText}
+              </p>
+
+              {(!s.isTrustworthy || s.extractionStatus === 'needs_review' || (s.validationFlags && s.validationFlags.length > 0)) && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
+                  <span className="text-[11px] text-slate-500">
+                    Detected damaged layout or font corruption. Recover with Gemini Vision fallback.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isRecoveringBatch || isRecovering}
+                    onClick={() => handleRecoverPages([s.pageNum])}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 ${isRecovering ? 'animate-spin' : ''}`} />
+                    <span>{isRecovering ? 'Transcribing...' : 'Recover with Gemini Vision'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        };
+
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
             <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 transition-all max-h-[90vh] flex flex-col">
@@ -905,63 +1277,43 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
 
               {/* Advisory note */}
               <div className="mt-3 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 shrink-0">
-                These excerpts are extracted directly from the uploaded physical PDF text layer. They are not generated or paraphrased by Gemini.
+                These excerpts show authentic extracted textbook content and validation status. Damaged mathematical expressions or corrupted font encodings can be recovered using Gemini Vision.
               </div>
+
+              {recoveryProgress && (
+                <div className="mt-3 p-2.5 bg-purple-50 border border-purple-200 rounded-xl text-xs font-medium text-purple-700 flex items-center gap-2 shrink-0">
+                  <Sparkles className="w-4 h-4 animate-spin text-purple-600" />
+                  <span>{recoveryProgress}</span>
+                </div>
+              )}
 
               {/* Excerpts List */}
               <div className="mt-4 flex-1 overflow-y-auto space-y-4 pr-1">
-                {/* Beginning Sample */}
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                    <span>Beginning of Chapter Sample</span>
-                    <span className="text-[11px] font-semibold text-slate-500">
-                      PDF Page {samples.begPageNum}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-700 leading-relaxed font-mono bg-white p-3 rounded-lg border border-slate-200 whitespace-pre-line">
-                    {samples.beginningSample}
-                  </p>
-                </div>
-
-                {/* Middle Sample */}
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                    <span>Middle of Chapter Sample</span>
-                    <span className="text-[11px] font-semibold text-slate-500">
-                      PDF Page {samples.midPageNum}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-700 leading-relaxed font-mono bg-white p-3 rounded-lg border border-slate-200 whitespace-pre-line">
-                    {samples.middleSample}
-                  </p>
-                </div>
-
-                {/* Ending Sample */}
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                    <span>End of Chapter Sample</span>
-                    <span className="text-[11px] font-semibold text-slate-500">
-                      PDF Page {samples.endPageNum}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-700 leading-relaxed font-mono bg-white p-3 rounded-lg border border-slate-200 whitespace-pre-line">
-                    {samples.endingSample}
-                  </p>
-                </div>
+                {renderExcerptCard('Beginning of Chapter Sample', samples.begSample)}
+                {renderExcerptCard('Middle of Chapter Sample', samples.midSample)}
+                {renderExcerptCard('End of Chapter Sample', samples.endSample)}
 
                 {/* Detected Topics List */}
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
-                  <span className="text-xs font-bold text-slate-800 block">
-                    Detected Topics & Learning Units ({chapTopics.length})
-                  </span>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-slate-800">
+                      Curricular Learning Units & Subtopics ({chapTopics.length})
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      AI Classifications (Not authentic textbook headings)
+                    </span>
+                  </div>
                   {chapTopics.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {chapTopics.map((top) => (
                         <div
                           key={top.id}
-                          className="p-2 bg-white rounded-lg border border-slate-200 text-xs text-slate-800"
+                          className="p-2.5 bg-white rounded-lg border border-slate-200 text-xs text-slate-800 flex items-center justify-between gap-2"
                         >
-                          {top.title}
+                          <span className="font-medium">{top.title}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-semibold shrink-0 uppercase tracking-wider">
+                            {top.category === 'authentic_heading' ? 'Textbook Heading' : 'AI Classification'}
+                          </span>
                         </div>
                       ))}
                     </div>

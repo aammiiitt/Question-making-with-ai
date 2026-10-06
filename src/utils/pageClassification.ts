@@ -1,18 +1,19 @@
-import { PageCoverageRecord, TextQualityStatus } from '../types';
-import { evaluateTextQuality } from './textQuality';
+import { PageCoverageRecord, TextQualityStatus, ExtractionMethod, ExtractionStatus } from '../types';
+import { validatePageTextQuality, evaluateTextQuality } from './textQuality';
 
 /**
- * Canonical classification for physical PDF page coverage with Hybrid OCR support.
+ * Canonical classification for physical PDF page coverage with Safe Hybrid OCR pipeline support.
  *
- * READ (Usable Text):
- *   native_good (characterCount >= 150 AND wordCount >= 20 without garbled encoding)
- *   OR successful OCR transcribed text
+ * READ / VERIFIED (Usable Text):
+ *   native_pdf verified (characterCount >= 40, without garbled font encoding or vertically split fractions)
+ *   OR successful Gemini Vision transcribed text (vision_recovered)
  *
- * LOW_TEXT / ATTENTION:
- *   native_low_text, native_garbled, empty, image_only, or ocr_failed
+ * NEEDS REVIEW / ATTENTION:
+ *   damaged fractions (vertically_separated_digits), gibberish encoding (7KLV %RRN),
+ *   corrupted legacy fonts, empty, or ocr_failed
  *
  * Guarantee: Mutually exclusive groups.
- * Successfully Read + Needs Attention = Total Physical PDF Pages
+ * Successfully Read + Needing Attention = Total Physical PDF Pages
  * Coverage Percentage = (Successfully Read / Total Physical PDF Pages) * 100
  */
 export function classifyPageCoverage(
@@ -25,13 +26,24 @@ export function classifyPageCoverage(
     errorReason?: string;
   }
 ): PageCoverageRecord {
+  // Approximate front-matter offset: Physical PDF page 12 is textbook page 1
+  const printedPageNumber = pageNumber >= 12 ? pageNumber - 11 : undefined;
+
   if (isFailed) {
     return {
       pageNumber,
+      physicalPdfPage: pageNumber,
+      printedPageNumber,
       characterCount: 0,
       wordCount: 0,
       hasUsableText: false,
       extractionStatus: 'failed',
+      extractionMethod: 'native_pdf',
+      extractionConfidence: 0,
+      rawExtractedText: '',
+      normalizedText: '',
+      validationFlags: ['empty_page'],
+      isTrustworthy: false,
       flagReason: 'Page extraction failed during PDF parsing or file was unreadable.',
       nativeText: '',
       nativeCharacterCount: 0,
@@ -40,7 +52,6 @@ export function classifyPageCoverage(
       textQualityStatus: 'image_only',
       requiresOcr: true,
       finalText: '',
-      extractionMethod: 'native',
       ocrStatus: 'none',
     };
   }
@@ -50,23 +61,32 @@ export function classifyPageCoverage(
   const nativeWords = cleanNative ? cleanNative.split(/\s+/).filter(Boolean) : [];
   const nativeWordCount = nativeWords.length;
 
-  const quality = evaluateTextQuality(cleanNative);
+  const quality = validatePageTextQuality(cleanNative);
 
-  // If OCR result is provided, merge it authoritatively (Requirement 7)
+  // If OCR / Vision result is provided, merge it authoritatively
   if (ocrResult) {
     if (ocrResult.status === 'ocr_success' && ocrResult.text.trim().length > 0) {
       const cleanOcr = ocrResult.text.trim();
       const ocrChars = cleanOcr.length;
       const ocrWords = cleanOcr.split(/\s+/).filter(Boolean).length;
-      const hasUsable = ocrChars >= 40 || ocrWords >= 10;
+      const ocrQuality = validatePageTextQuality(cleanOcr);
+      const hasUsable = ocrChars >= 25 || ocrWords >= 6;
 
       return {
         pageNumber,
+        physicalPdfPage: pageNumber,
+        printedPageNumber,
         characterCount: ocrChars,
         wordCount: ocrWords,
         hasUsableText: hasUsable,
-        extractionStatus: hasUsable ? 'read' : 'low_text',
-        flagReason: hasUsable ? undefined : 'OCR extracted short formula/diagram content.',
+        extractionStatus: hasUsable ? 'vision_recovered' : 'needs_review',
+        extractionMethod: 'vision',
+        extractionConfidence: hasUsable ? 0.92 : 0.4,
+        rawExtractedText: cleanNative,
+        normalizedText: cleanOcr.replace(/[ \t]+/g, ' ').replace(/\n\s+/g, '\n'),
+        validationFlags: hasUsable ? [] : ['low_text_diagram'],
+        isTrustworthy: hasUsable,
+        flagReason: hasUsable ? undefined : 'Vision extracted short formula/diagram content.',
         nativeText: cleanNative,
         nativeCharacterCount: nativeCharCount,
         nativeWordCount: nativeWordCount,
@@ -74,25 +94,31 @@ export function classifyPageCoverage(
         textQualityStatus: 'ocr_success',
         requiresOcr: false,
         finalText: cleanOcr,
-        extractionMethod: 'ocr',
         ocrStatus: 'success',
       };
     } else {
       return {
         pageNumber,
+        physicalPdfPage: pageNumber,
+        printedPageNumber,
         characterCount: nativeCharCount,
         wordCount: nativeWordCount,
         hasUsableText: false,
         extractionStatus: 'failed',
-        flagReason: ocrResult.errorReason || 'OCR transcription failed for this physical page.',
+        extractionMethod: 'vision',
+        extractionConfidence: 0.1,
+        rawExtractedText: cleanNative,
+        normalizedText: quality.normalizedText,
+        validationFlags: [...quality.validationFlags, 'vision_failed'],
+        isTrustworthy: false,
+        flagReason: ocrResult.errorReason || 'Gemini Vision fallback extraction failed for this physical page.',
         nativeText: cleanNative,
         nativeCharacterCount: nativeCharCount,
         nativeWordCount: nativeWordCount,
         textQualityScore: quality.score,
         textQualityStatus: 'ocr_failed',
         requiresOcr: true,
-        finalText: quality.status === 'native_garbled' ? '' : cleanNative,
-        extractionMethod: 'ocr',
+        finalText: quality.isTrustworthy ? cleanNative : '',
         ocrStatus: 'failed',
         ocrErrorReason: ocrResult.errorReason,
       };
@@ -100,31 +126,31 @@ export function classifyPageCoverage(
   }
 
   // Native classification based on text quality analysis
-  let extractionStatus: 'read' | 'low_text' | 'empty' | 'failed';
+  let extractionStatus: ExtractionStatus;
   let hasUsableText = false;
 
-  if (quality.status === 'image_only') {
-    extractionStatus = 'empty';
-    hasUsableText = false;
-  } else if (quality.status === 'native_garbled') {
-    // Corrupted legacy encoding must NEVER be counted as successfully read!
-    extractionStatus = 'low_text';
-    hasUsableText = false;
-  } else if (quality.status === 'native_good') {
-    extractionStatus = 'read';
+  if (quality.isTrustworthy) {
+    extractionStatus = 'verified';
     hasUsableText = true;
   } else {
-    // native_low_text
-    extractionStatus = 'low_text';
+    extractionStatus = 'needs_review';
     hasUsableText = false;
   }
 
   return {
     pageNumber,
+    physicalPdfPage: pageNumber,
+    printedPageNumber,
     characterCount: nativeCharCount,
     wordCount: nativeWordCount,
     hasUsableText,
     extractionStatus,
+    extractionMethod: 'native_pdf',
+    extractionConfidence: quality.extractionConfidence,
+    rawExtractedText: cleanNative,
+    normalizedText: quality.normalizedText,
+    validationFlags: quality.validationFlags,
+    isTrustworthy: quality.isTrustworthy,
     flagReason: quality.flagReason,
     nativeText: cleanNative,
     nativeCharacterCount: nativeCharCount,
@@ -132,8 +158,7 @@ export function classifyPageCoverage(
     textQualityScore: quality.score,
     textQualityStatus: quality.status,
     requiresOcr: quality.requiresOcr,
-    finalText: quality.status === 'native_garbled' ? '' : cleanNative,
-    extractionMethod: 'native',
+    finalText: quality.isTrustworthy ? cleanNative : '',
     ocrStatus: 'none',
   };
 }

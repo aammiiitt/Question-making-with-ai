@@ -105,20 +105,39 @@ class StorageService {
   public deleteDocument(id: string): void {
     const docs = this.getDocuments().filter((d) => d.id !== id);
     localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(docs));
-    // also remove chapters, topics, chunks, and pages
+
+    // Remove chapters belonging to document
     const chaps = this.getChapters().filter((c) => c.document_id !== id);
     localStorage.setItem(STORAGE_KEYS.CHAPTERS, JSON.stringify(chaps));
+
+    // Remove topics belonging to document
     const tops = this.getTopics().filter((t) => t.document_id !== id);
     localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(tops));
+
+    // Remove knowledge chunks belonging to document
     const chunks = this.getChunks().filter((c) => c.document_id !== id);
     localStorage.setItem(STORAGE_KEYS.CHUNKS, JSON.stringify(chunks));
+
+    // Remove document-linked generated questions
+    const questions = this.getQuestions().filter((q) => q.document_id !== id);
+    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questions));
+
     if (this.isBrowser()) {
       try {
+        // Remove cached document pages
         const pagesStore = JSON.parse(localStorage.getItem(STORAGE_KEYS.DOCUMENT_PAGES) || '{}');
         delete pagesStore[id];
         localStorage.setItem(STORAGE_KEYS.DOCUMENT_PAGES, JSON.stringify(pagesStore));
-      } catch {
-        // ignore
+
+        // Remove page coverage data
+        const coverageStore = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAGE_COVERAGE) || '{}');
+        delete coverageStore[id];
+        localStorage.setItem(STORAGE_KEYS.PAGE_COVERAGE, JSON.stringify(coverageStore));
+
+        // Remove chapter diagnostics
+        localStorage.removeItem(`${STORAGE_KEYS.CHAPTER_DIAGNOSTICS}_${id}`);
+      } catch (err) {
+        console.warn('Error clearing document caches during deletion:', err);
       }
     }
   }

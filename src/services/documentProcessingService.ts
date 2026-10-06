@@ -2,6 +2,7 @@ import { DocumentItem, PipelineStep } from '../types';
 import { chapterDetectionService } from './chapterDetectionService';
 import { storageService } from './storageService';
 import { classifyPageCoverage, computePageCoverageSummary } from '../utils/pageClassification';
+import { detectSourceLanguage } from '../utils/sourceClassification';
 
 export const PIPELINE_STEPS: { step: number; name: string; description: string }[] = [
   { step: 1, name: 'File uploaded', description: 'Verifying PDF structure and integrity' },
@@ -76,8 +77,6 @@ export class DocumentProcessingService {
 
     // Step 3: Quality audited & Page-level coverage check
     updateStep(2, 'in_progress');
-    // Save physical pages to storage for subsequent verification and re-indexing
-    storageService.saveDocumentPages(docId, extractedPages);
 
     // Compute deterministic page-level coverage check using canonical classification & quality signals
     let totalExtractedWords = 0;
@@ -87,24 +86,30 @@ export class DocumentProcessingService {
       return record;
     });
 
+    // Save physical pages to storage for subsequent verification and re-indexing
+    const initialPagesForStorage = extractedPages.map((p, idx) => {
+      const record = pageCoverageRecords[idx];
+      return {
+        pageNumber: p.pageNumber,
+        text: record?.finalText || p.text,
+        rawExtractedText: p.text,
+        normalizedText: record?.normalizedText,
+        extractionMethod: record?.extractionMethod || 'native_pdf',
+        extractionStatus: record?.extractionStatus || 'needs_review',
+        extractionConfidence: record?.extractionConfidence ?? 0.5,
+        validationFlags: record?.validationFlags || [],
+        textQualityStatus: record?.textQualityStatus,
+        physicalPdfPage: record?.physicalPdfPage || p.pageNumber,
+        printedPageNumber: record?.printedPageNumber,
+      };
+    });
+    storageService.saveDocumentPages(docId, initialPagesForStorage);
+
     const summary = computePageCoverageSummary(pageCoverageRecords, pageCount);
     storageService.savePageCoverage(docId, pageCoverageRecords);
 
-    // Basic script / language identification
-    const allSampleText = extractedPages.slice(0, 15).map((p) => p.text).join(' ');
-    const bengaliMatches = allSampleText.match(/[\u0980-\u09FF]/g);
-    const hindiMatches = allSampleText.match(/[\u0900-\u097F]/g);
-    let detectedLanguage: DocumentItem['language'] = 'Not yet verified';
-    if (bengaliMatches && bengaliMatches.length > 40) {
-      detectedLanguage = 'Bengali';
-    } else if (hindiMatches && hindiMatches.length > 40) {
-      detectedLanguage = 'Hindi';
-    } else if (/[a-zA-Z]{50,}/.test(allSampleText)) {
-      detectedLanguage = 'English';
-    } else if (summary.nativeGarbledCount > 3) {
-      // Suspected Bengali with legacy font corruption
-      detectedLanguage = 'Bengali';
-    }
+    // Source language identification using script counts across first 40–50 pages
+    const detectedLanguage = detectSourceLanguage(extractedPages);
 
     await new Promise((r) => setTimeout(r, 500));
     const bookTitle = file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
@@ -146,7 +151,7 @@ export class DocumentProcessingService {
       };
 
       storageService.saveDocument(fallbackDoc);
-      updateStep(6, 'completed');
+      updateStep(6, 'failed');
       return fallbackDoc;
     }
 
@@ -162,28 +167,58 @@ export class DocumentProcessingService {
     );
     await new Promise((r) => setTimeout(r, 750));
 
-    const needsReview = detectionResult.chapters.length === 0;
-    if (needsReview) {
-      updateStep(3, 'failed');
-    } else {
-      updateStep(3, 'completed');
+    if (detectionResult.diagnostics) {
+      storageService.saveChapterDiagnostics(docId, detectionResult.diagnostics);
     }
 
-    // Step 5: Topics detected
-    updateStep(4, 'in_progress');
-    await new Promise((r) => setTimeout(r, 500));
-    updateStep(4, needsReview ? 'failed' : 'completed');
+    const needsReview = detectionResult.chapters.length === 0;
+    if (needsReview) {
+      // If zero chapters are detected, mark chapter step as failed / needs review
+      updateStep(3, 'failed');
+      // Do not mark Topics / Knowledge Indexed as completed when no chapters/chunks exist
+      updateStep(4, 'pending');
+      updateStep(5, 'pending');
+      updateStep(6, 'failed');
+    } else {
+      updateStep(3, 'completed');
 
-    // Step 6: Knowledge indexed
-    updateStep(5, 'in_progress');
-    detectionResult.chapters.forEach((c) => storageService.saveChapter(c));
-    detectionResult.topics.forEach((t) => storageService.saveTopic(t));
-    detectionResult.chunks.forEach((chk) => storageService.saveChunk(chk));
-    await new Promise((r) => setTimeout(r, 500));
-    updateStep(5, needsReview ? 'failed' : 'completed');
+      // Step 5: Topics detected
+      updateStep(4, 'in_progress');
+      await new Promise((r) => setTimeout(r, 500));
+      updateStep(4, 'completed');
+
+      // Step 6: Knowledge indexed
+      updateStep(5, 'in_progress');
+      detectionResult.chapters.forEach((c) => storageService.saveChapter(c));
+      detectionResult.topics.forEach((t) => storageService.saveTopic(t));
+      detectionResult.chunks.forEach((chk) => storageService.saveChunk(chk));
+
+      // Associate chapterId with each page coverage record and stored page
+      for (const record of pageCoverageRecords) {
+        const matchingChap = detectionResult.chapters.find(
+          (c) => record.pageNumber >= c.page_start && record.pageNumber <= c.page_end
+        );
+        if (matchingChap) {
+          record.chapterId = matchingChap.id;
+        }
+      }
+      storageService.savePageCoverage(docId, pageCoverageRecords);
+
+      const currentStoredPages = storageService.getDocumentPages(docId);
+      const updatedStoredPages = currentStoredPages.map((sp: any) => {
+        const matchingChap = detectionResult.chapters.find(
+          (c) => sp.pageNumber >= c.page_start && sp.pageNumber <= c.page_end
+        );
+        return matchingChap ? { ...sp, chapterId: matchingChap.id } : sp;
+      });
+      storageService.saveDocumentPages(docId, updatedStoredPages);
+
+      await new Promise((r) => setTimeout(r, 500));
+      updateStep(5, 'completed');
+      updateStep(6, 'completed');
+    }
 
     // Step 7: Final Document status
-    updateStep(6, 'in_progress');
     const newDoc: DocumentItem = {
       id: docId,
       user_id: 'teacher-101',
@@ -213,7 +248,6 @@ export class DocumentProcessingService {
 
     storageService.saveDocument(newDoc);
     await new Promise((r) => setTimeout(r, 300));
-    updateStep(6, 'completed');
 
     return newDoc;
   }

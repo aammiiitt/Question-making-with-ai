@@ -59,6 +59,9 @@ export default function App() {
   };
 
   const handleDeleteBook = (bookId: string) => {
+    if (selectedBookIdForDetails === bookId) {
+      setSelectedBookIdForDetails(null);
+    }
     storageService.deleteDocument(bookId);
     refreshData();
     showToast('Textbook deleted from library.', 'info');

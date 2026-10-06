@@ -24,9 +24,9 @@ export const DEMO_BOOK: DocumentItem = {
   teacher_confirmed_at: '2026-09-15T10:30:00Z',
   total_extracted_chars: 120500,
   total_words: 18200,
-  usable_pages_count: 154,
+  usable_pages_count: 142,
   attention_pages_count: 6,
-  coverage_percentage: 96.3,
+  coverage_percentage: 95.9,
   created_at: '2026-09-15T10:30:00Z',
 };
 

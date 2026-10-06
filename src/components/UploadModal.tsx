@@ -230,7 +230,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <span>Textbook Processing Pipeline</span>
               <span>
                 {completedDoc
-                  ? '7 of 7 stages completed'
+                  ? (completedDoc.detected_chapters_count === 0
+                      ? 'Text extraction completed, but chapter mapping needs review.'
+                      : '7 of 7 stages completed')
                   : `Stage ${Math.max(1, currentStepIndex)} of 7`}
               </span>
             </div>
@@ -238,6 +240,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             <div className="space-y-2.5 py-1">
               {pipelineSteps.map((step) => {
                 const isDone = step.status === 'completed';
+                const isFailed = step.status === 'failed';
                 const isCurrent = step.status === 'in_progress';
 
                 return (
@@ -246,6 +249,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     className={`flex items-center justify-between p-2.5 rounded-xl border text-xs transition-colors ${
                       isDone
                         ? 'bg-emerald-50/50 border-emerald-200/80 text-emerald-950'
+                        : isFailed
+                        ? 'bg-amber-50/60 border-amber-200 text-amber-950'
                         : isCurrent
                         ? 'bg-slate-100/90 border-slate-300 text-slate-900 font-semibold'
                         : 'bg-white border-slate-100 text-slate-400'
@@ -255,6 +260,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0">
                         {isDone ? (
                           <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                        ) : isFailed ? (
+                          <AlertCircle className="w-5 h-5 text-amber-600" />
                         ) : isCurrent ? (
                           <Loader2 className="w-4 h-4 text-slate-800 animate-spin" />
                         ) : (
@@ -264,7 +271,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                         )}
                       </div>
                       <div>
-                        <p className={isDone ? 'font-medium text-emerald-900' : isCurrent ? 'font-semibold text-slate-900' : 'text-slate-500'}>
+                        <p className={isDone ? 'font-medium text-emerald-900' : isFailed ? 'font-semibold text-amber-950' : isCurrent ? 'font-semibold text-slate-900' : 'text-slate-500'}>
                           {step.name}
                         </p>
                         <p className="text-[11px] text-slate-500 font-normal">
@@ -273,8 +280,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       </div>
                     </div>
 
-                    <span className="text-[11px] font-medium capitalize">
-                      {isDone ? 'Done' : isCurrent ? 'Active...' : 'Pending'}
+                    <span className={`text-[11px] font-semibold ${isDone ? 'text-emerald-700' : isFailed ? 'text-amber-700' : isCurrent ? 'text-slate-700' : 'text-slate-400'}`}>
+                      {isDone ? 'Done' : isFailed ? 'Needs Review' : isCurrent ? 'Active...' : 'Pending'}
                     </span>
                   </div>
                 );
@@ -282,17 +289,35 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             </div>
 
             {completedDoc && (
-              <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
-                <div className="flex items-center gap-2 text-emerald-950 font-semibold text-xs">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Textbook processed and indexed! Software proofs & coverage ready.</span>
+              <div className={`mt-4 p-4 rounded-xl space-y-2 border ${
+                completedDoc.detected_chapters_count === 0
+                  ? 'bg-amber-50 border-amber-200'
+                  : 'bg-emerald-50 border-emerald-200'
+              }`}>
+                <div className={`flex items-center gap-2 font-semibold text-xs ${
+                  completedDoc.detected_chapters_count === 0 ? 'text-amber-950' : 'text-emerald-950'
+                }`}>
+                  {completedDoc.detected_chapters_count === 0 ? (
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  )}
+                  <span>
+                    {completedDoc.detected_chapters_count === 0
+                      ? 'Text extraction completed, but chapter mapping needs review.'
+                      : 'Textbook processed and indexed! Software proofs & coverage ready.'}
+                  </span>
                 </div>
-                <div className="text-xs text-emerald-800 flex items-center gap-3">
+                <div className={`text-xs flex items-center gap-3 ${
+                  completedDoc.detected_chapters_count === 0 ? 'text-amber-800' : 'text-emerald-800'
+                }`}>
                   <span>{completedDoc.detected_chapters_count} Chapters detected</span>
                   <span>·</span>
                   <span>{completedDoc.page_count} Physical PDF Pages indexed</span>
                 </div>
-                <p className="text-[11px] text-emerald-900 mt-1">
+                <p className={`text-[11px] mt-1 ${
+                  completedDoc.detected_chapters_count === 0 ? 'text-amber-900' : 'text-emerald-900'
+                }`}>
                   Next Step: Review the Textbook Processing & Verification Report and verify physical chapter page numbers before exam generation.
                 </p>
                 <div className="pt-2 flex items-center justify-end gap-2">

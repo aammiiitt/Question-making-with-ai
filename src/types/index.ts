@@ -42,13 +42,34 @@ export type TextQualityStatus =
   | 'ocr_success'
   | 'ocr_failed';
 
+export type ExtractionMethod = 'native_pdf' | 'vision' | 'hybrid';
+export type ExtractionStatus = 'verified' | 'vision_recovered' | 'needs_review' | 'failed';
+export type ValidationFlag =
+  | 'vertically_separated_digits'
+  | 'gibberish_encoded_text'
+  | 'excessive_symbols'
+  | 'corrupted_legacy_glyphs'
+  | 'low_text_diagram'
+  | 'empty_page'
+  | 'vision_failed';
+
 export interface PageCoverageRecord {
   pageNumber: number;
+  physicalPdfPage?: number;
+  printedPageNumber?: number;
+  chapterId?: string;
   characterCount: number;
   wordCount: number;
   hasUsableText: boolean;
-  extractionStatus: 'read' | 'low_text' | 'empty' | 'failed';
+  extractionStatus: ExtractionStatus | 'read' | 'low_text' | 'empty';
   flagReason?: string;
+  // Safe Hybrid Pipeline validation & confidence fields
+  extractionMethod?: ExtractionMethod | 'native' | 'ocr';
+  extractionConfidence?: number;
+  rawExtractedText?: string;
+  normalizedText?: string;
+  validationFlags?: (ValidationFlag | string)[];
+  isTrustworthy?: boolean;
   // Hybrid OCR fields
   nativeText?: string;
   nativeCharacterCount?: number;
@@ -57,7 +78,6 @@ export interface PageCoverageRecord {
   textQualityStatus?: TextQualityStatus;
   requiresOcr?: boolean;
   finalText?: string;
-  extractionMethod?: 'native' | 'ocr';
   ocrStatus?: 'none' | 'pending' | 'success' | 'failed';
   ocrErrorReason?: string;
 }
@@ -145,6 +165,8 @@ export interface Topic {
   chapter_id: string;
   document_id: string;
   title: string;
+  category?: 'authentic_heading' | 'ai_classified_unit';
+  is_authentic_heading?: boolean;
 }
 
 export interface KnowledgeChunk {
@@ -157,6 +179,9 @@ export interface KnowledgeChunk {
   text: string;
   embedding_reference?: string;
   extraction_confidence: number;
+  extraction_method?: ExtractionMethod | 'native' | 'ocr';
+  source_physical_pages?: number[];
+  printed_pages?: number[];
 }
 
 export interface MarkingCriterion {

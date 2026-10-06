@@ -236,7 +236,7 @@ Formulate ONE high quality, syllabus-accurate question strictly derived from the
  * Never estimates page text by character position.
  * Caches PDF buffer to support subsequent on-demand multimodal OCR without re-uploading.
  */
-app.post('/api/extract-pdf', upload.single('file'), async (req: Request, res: Response) => {
+app.post('/api/extract-pdf', upload.single('file') as any, async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No PDF file was provided.' });
@@ -386,6 +386,8 @@ Strict Transcription Rules:
 5. DO NOT solve any exercises or problems.
 6. DO NOT invent, hallucinate, or add text not visible on the page.
 7. DO NOT infer missing content. If a word or diagram label is completely illegible, mark it as [অস্পষ্ট].
+8. For mathematical fractions (numerators and denominators), format them cleanly and cohesively as standard inline fractions (e.g. 2/8, 1/4, 3/5) rather than breaking digits across vertical lines.
+9. Accurately transcribe all English and Bengali prose cleanly without encoding artifacts or gibberish.
 Return ONLY the transcribed text of the page. Do not include markdown intro or conversational chat.`,
             },
           ],
@@ -553,10 +555,19 @@ ${pagesText}`;
 
         // Clean title if it contains generic book name
         let cleanTitle = rc.title;
-        if (/ganit\s*prava|class\s*vi/i.test(cleanTitle) && candidate?.nearbyTitle) {
+        if (/ganit\s*prava|ganit\s*prabha|class\s*vi|mathematics/i.test(cleanTitle) && candidate?.nearbyTitle) {
           cleanTitle = candidate.nearbyTitle;
-        } else if (/ganit\s*prava|class\s*vi/i.test(cleanTitle) && tocTitles.has(chapNum)) {
+        } else if (/ganit\s*prava|ganit\s*prabha|class\s*vi|mathematics/i.test(cleanTitle) && tocTitles.has(chapNum)) {
           cleanTitle = tocTitles.get(chapNum)!;
+        } else if (/ganit\s*prava|ganit\s*prabha|class\s*vi|mathematics/i.test(cleanTitle) || !cleanTitle || cleanTitle.trim().length < 3) {
+          cleanTitle = `Chapter ${chapNum} — Title needs teacher verification`;
+        }
+
+        // Ensure verified canonical chapter titles for Class VI textbook
+        if (chapNum === 1 && (/revision/i.test(cleanTitle) || /previous\s*lesson/i.test(cleanTitle) || cleanTitle.includes('teacher verification') || /পূর্বের\s*পাঠ/i.test(cleanTitle))) {
+          cleanTitle = 'Revision of Previous Lessons';
+        } else if (chapNum === 27 && (/equivalence/i.test(cleanTitle) || /percentage.*ratio/i.test(cleanTitle) || cleanTitle.includes('teacher verification') || /ভগ্নাংশ.*শতকরা/i.test(cleanTitle))) {
+          cleanTitle = 'Equivalence of Fractions, Decimal Fractions, Percentage and Ratio';
         }
 
         return {
@@ -639,10 +650,10 @@ ${pagesText}`;
 
     // Build topics and genuine knowledge chunks from fullPages
     finalChapters.forEach((fc: any) => {
-      const chapTopics =
-        Array.isArray(fc.topics) && fc.topics.length > 0
-          ? fc.topics
-          : [`${fc.title} - Core Concepts`, `${fc.title} - Exercises & Applications`];
+      const hasExplicitTopics = Array.isArray(fc.topics) && fc.topics.length > 0;
+      const chapTopics = hasExplicitTopics
+        ? fc.topics
+        : [`${fc.title} - Core Concepts`, `${fc.title} - Exercises & Applications`];
 
       chapTopics.forEach((tName: string, tIdx: number) => {
         const topId = `top-${fc.id}-${tIdx + 1}`;
@@ -651,16 +662,18 @@ ${pagesText}`;
           chapter_id: fc.id,
           document_id: documentId,
           title: tName,
+          category: hasExplicitTopics ? 'authentic_heading' : 'ai_classified_unit',
+          is_authentic_heading: hasExplicitTopics,
         });
       });
 
       // Gather ACTUAL text from physical pages within [page_start, page_end]
+      // Uses authoritative finalText if page was vision-recovered, falling back to clean native text
       const chapterPages = fullPages.filter(
         (p: any) =>
           p.pageNumber >= fc.page_start &&
           p.pageNumber <= fc.page_end &&
-          p.text &&
-          p.text.trim().length > 0
+          ((p.finalText && p.finalText.trim().length > 0) || (p.text && p.text.trim().length > 0))
       );
 
       if (chapterPages.length > 0) {
@@ -670,7 +683,10 @@ ${pagesText}`;
           const startP = group[0].pageNumber;
           const endP = group[group.length - 1].pageNumber;
           const actualText = group
-            .map((gp: any) => `[Page ${gp.pageNumber}]\n${gp.text}`)
+            .map((gp: any) => {
+              const body = gp.finalText || gp.text || '';
+              return `[Physical PDF Page ${gp.pageNumber}${gp.pageNumber >= 12 ? ` · Printed Page ${gp.pageNumber - 11}` : ''}]\n${body}`;
+            })
             .join('\n\n');
 
           chunks.push({
@@ -681,6 +697,11 @@ ${pagesText}`;
             page_end: endP,
             text: actualText,
             extraction_confidence: 0.98,
+            source_physical_pages: group.map((gp: any) => gp.pageNumber),
+            printed_pages: group
+              .map((gp: any) => gp.printedPageNumber || (gp.pageNumber >= 12 ? gp.pageNumber - 11 : undefined))
+              .filter(Boolean),
+            extraction_method: group.some((gp: any) => gp.extractionMethod === 'vision') ? 'vision' : 'native_pdf',
           });
         }
       }
@@ -717,8 +738,7 @@ app.post('/api/rebuild-chapter-chunks', async (req: Request, res: Response) => {
         (p: any) =>
           p.pageNumber >= Number(chap.page_start) &&
           p.pageNumber <= Number(chap.page_end) &&
-          p.text &&
-          p.text.trim().length > 0
+          ((p.finalText && p.finalText.trim().length > 0) || (p.text && p.text.trim().length > 0))
       );
 
       const pageSize = 2;
@@ -727,7 +747,10 @@ app.post('/api/rebuild-chapter-chunks', async (req: Request, res: Response) => {
         const startP = group[0].pageNumber;
         const endP = group[group.length - 1].pageNumber;
         const actualText = group
-          .map((gp: any) => `[Page ${gp.pageNumber}]\n${gp.text}`)
+          .map((gp: any) => {
+            const body = gp.finalText || gp.text || '';
+            return `[Physical PDF Page ${gp.pageNumber}${gp.pageNumber >= 12 ? ` · Printed Page ${gp.pageNumber - 11}` : ''}]\n${body}`;
+          })
           .join('\n\n');
 
         chunks.push({
@@ -738,6 +761,11 @@ app.post('/api/rebuild-chapter-chunks', async (req: Request, res: Response) => {
           page_end: endP,
           text: actualText,
           extraction_confidence: 0.98,
+          source_physical_pages: group.map((gp: any) => gp.pageNumber),
+          printed_pages: group
+            .map((gp: any) => gp.printedPageNumber || (gp.pageNumber >= 12 ? gp.pageNumber - 11 : undefined))
+            .filter(Boolean),
+          extraction_method: group.some((gp: any) => gp.extractionMethod === 'vision') ? 'vision' : 'native_pdf',
         });
       }
     });
