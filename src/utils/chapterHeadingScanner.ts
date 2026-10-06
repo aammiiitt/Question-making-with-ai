@@ -454,19 +454,12 @@ export function buildDeterministicChapters(
     const pageStart = current.physicalPage;
     const pageEnd = next ? Math.max(pageStart, next.physicalPage - 1) : totalPages;
 
-    let resolvedTitle =
+    const resolvedTitle =
       tocTitles?.get(current.chapterNumber) ||
       current.nearbyTitle ||
       `Chapter ${current.chapterNumber} — Title needs teacher verification`;
 
-    // Ensure verified canonical chapter titles for Class VI textbook
-    if (current.chapterNumber === 1 && (/revision/i.test(resolvedTitle) || /previous\s*lesson/i.test(resolvedTitle) || resolvedTitle.includes('teacher verification') || /পূর্বের\s*পাঠ/i.test(resolvedTitle))) {
-      resolvedTitle = 'Revision of Previous Lessons';
-    } else if (current.chapterNumber === 27 && (/equivalence/i.test(resolvedTitle) || /percentage.*ratio/i.test(resolvedTitle) || resolvedTitle.includes('teacher verification') || /ভগ্নাংশ.*শতকরা/i.test(resolvedTitle))) {
-      resolvedTitle = 'Equivalence of Fractions, Decimal Fractions, Percentage and Ratio';
-    }
-
-    const isProvisional = !tocTitles?.get(current.chapterNumber) && !current.nearbyTitle && resolvedTitle.includes('teacher verification');
+    const isProvisional = !tocTitles?.get(current.chapterNumber) && !current.nearbyTitle;
 
     chapters.push({
       id: `chap-${documentId}-${current.chapterNumber}`,

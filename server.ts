@@ -559,15 +559,8 @@ ${pagesText}`;
           cleanTitle = candidate.nearbyTitle;
         } else if (/ganit\s*prava|ganit\s*prabha|class\s*vi|mathematics/i.test(cleanTitle) && tocTitles.has(chapNum)) {
           cleanTitle = tocTitles.get(chapNum)!;
-        } else if (/ganit\s*prava|ganit\s*prabha|class\s*vi|mathematics/i.test(cleanTitle) || !cleanTitle || cleanTitle.trim().length < 3) {
+        } else if (cleanTitle.trim().length < 3) {
           cleanTitle = `Chapter ${chapNum} — Title needs teacher verification`;
-        }
-
-        // Ensure verified canonical chapter titles for Class VI textbook
-        if (chapNum === 1 && (/revision/i.test(cleanTitle) || /previous\s*lesson/i.test(cleanTitle) || cleanTitle.includes('teacher verification') || /পূর্বের\s*পাঠ/i.test(cleanTitle))) {
-          cleanTitle = 'Revision of Previous Lessons';
-        } else if (chapNum === 27 && (/equivalence/i.test(cleanTitle) || /percentage.*ratio/i.test(cleanTitle) || cleanTitle.includes('teacher verification') || /ভগ্নাংশ.*শতকরা/i.test(cleanTitle))) {
-          cleanTitle = 'Equivalence of Fractions, Decimal Fractions, Percentage and Ratio';
         }
 
         return {
@@ -682,10 +675,43 @@ ${pagesText}`;
           const group = chapterPages.slice(cIdx, cIdx + pageSize);
           const startP = group[0].pageNumber;
           const endP = group[group.length - 1].pageNumber;
+
+          // CRITICAL ISSUE 1: Calculate safety confidence derived from minimum source page confidence
+          const groupConfidences = group.map((gp: any) =>
+            typeof gp.extractionConfidence === 'number'
+              ? gp.extractionConfidence
+              : typeof gp.confidence === 'number'
+              ? gp.confidence
+              : 0.5
+          );
+          const minConfidence = Number(Math.min(...groupConfidences).toFixed(2));
+          const hasFailedPage = group.some((gp: any) => gp.extractionStatus === 'failed');
+          const hasReviewPage = group.some((gp: any) => gp.extractionStatus === 'needs_review' || gp.isTrustworthy === false);
+          const hasVisionPage = group.some((gp: any) => gp.extractionMethod === 'vision' || gp.extractionStatus === 'vision_recovered');
+
+          let chunkStatus: 'verified' | 'vision_recovered' | 'needs_review' | 'failed' = 'verified';
+          if (hasFailedPage) {
+            chunkStatus = 'failed';
+          } else if (hasReviewPage || minConfidence < 0.65) {
+            chunkStatus = 'needs_review';
+          } else if (hasVisionPage) {
+            chunkStatus = 'vision_recovered';
+          } else {
+            chunkStatus = 'verified';
+          }
+
+          const chunkMethod: 'native_pdf' | 'vision' = hasVisionPage ? 'vision' : 'native_pdf';
+          const chunkFlags = Array.from(new Set(group.flatMap((gp: any) => gp.validationFlags || [])));
+
           const actualText = group
             .map((gp: any) => {
               const body = gp.finalText || gp.text || '';
-              return `[Physical PDF Page ${gp.pageNumber}${gp.pageNumber >= 12 ? ` · Printed Page ${gp.pageNumber - 11}` : ''}]\n${body}`;
+              // CRITICAL ISSUE 4: Only show printed page if genuinely known/detected; never assume hardcoded offset
+              const printedPart =
+                gp.printedPageNumber !== undefined && gp.printedPageNumber !== null
+                  ? ` · Printed Page ${gp.printedPageNumber}`
+                  : '';
+              return `[Physical PDF Page ${gp.pageNumber}${printedPart}]\n${body}`;
             })
             .join('\n\n');
 
@@ -696,12 +722,15 @@ ${pagesText}`;
             page_start: startP,
             page_end: endP,
             text: actualText,
-            extraction_confidence: 0.98,
+            extraction_confidence: minConfidence,
+            minimum_page_confidence: minConfidence,
+            extraction_status: chunkStatus,
+            extraction_method: chunkMethod,
+            validation_flags: chunkFlags,
             source_physical_pages: group.map((gp: any) => gp.pageNumber),
             printed_pages: group
-              .map((gp: any) => gp.printedPageNumber || (gp.pageNumber >= 12 ? gp.pageNumber - 11 : undefined))
-              .filter(Boolean),
-            extraction_method: group.some((gp: any) => gp.extractionMethod === 'vision') ? 'vision' : 'native_pdf',
+              .map((gp: any) => gp.printedPageNumber)
+              .filter((p: any) => p !== undefined && p !== null),
           });
         }
       }
@@ -741,32 +770,69 @@ app.post('/api/rebuild-chapter-chunks', async (req: Request, res: Response) => {
           ((p.finalText && p.finalText.trim().length > 0) || (p.text && p.text.trim().length > 0))
       );
 
-      const pageSize = 2;
-      for (let cIdx = 0; cIdx < chapterPages.length; cIdx += pageSize) {
-        const group = chapterPages.slice(cIdx, cIdx + pageSize);
-        const startP = group[0].pageNumber;
-        const endP = group[group.length - 1].pageNumber;
-        const actualText = group
-          .map((gp: any) => {
-            const body = gp.finalText || gp.text || '';
-            return `[Physical PDF Page ${gp.pageNumber}${gp.pageNumber >= 12 ? ` · Printed Page ${gp.pageNumber - 11}` : ''}]\n${body}`;
-          })
-          .join('\n\n');
+      if (chapterPages.length > 0) {
+        const pageSize = 2;
+        for (let cIdx = 0; cIdx < chapterPages.length; cIdx += pageSize) {
+          const group = chapterPages.slice(cIdx, cIdx + pageSize);
+          const startP = group[0].pageNumber;
+          const endP = group[group.length - 1].pageNumber;
 
-        chunks.push({
-          id: `chunk-${chap.id}-${Math.floor(cIdx / pageSize) + 1}`,
-          document_id: documentId,
-          chapter_id: chap.id,
-          page_start: startP,
-          page_end: endP,
-          text: actualText,
-          extraction_confidence: 0.98,
-          source_physical_pages: group.map((gp: any) => gp.pageNumber),
-          printed_pages: group
-            .map((gp: any) => gp.printedPageNumber || (gp.pageNumber >= 12 ? gp.pageNumber - 11 : undefined))
-            .filter(Boolean),
-          extraction_method: group.some((gp: any) => gp.extractionMethod === 'vision') ? 'vision' : 'native_pdf',
-        });
+          // CRITICAL ISSUE 1: Calculate safety confidence derived from minimum source page confidence
+          const groupConfidences = group.map((gp: any) =>
+            typeof gp.extractionConfidence === 'number'
+              ? gp.extractionConfidence
+              : typeof gp.confidence === 'number'
+              ? gp.confidence
+              : 0.5
+          );
+          const minConfidence = Number(Math.min(...groupConfidences).toFixed(2));
+          const hasFailedPage = group.some((gp: any) => gp.extractionStatus === 'failed');
+          const hasReviewPage = group.some((gp: any) => gp.extractionStatus === 'needs_review' || gp.isTrustworthy === false);
+          const hasVisionPage = group.some((gp: any) => gp.extractionMethod === 'vision' || gp.extractionStatus === 'vision_recovered');
+
+          let chunkStatus: 'verified' | 'vision_recovered' | 'needs_review' | 'failed' = 'verified';
+          if (hasFailedPage) {
+            chunkStatus = 'failed';
+          } else if (hasReviewPage || minConfidence < 0.65) {
+            chunkStatus = 'needs_review';
+          } else if (hasVisionPage) {
+            chunkStatus = 'vision_recovered';
+          } else {
+            chunkStatus = 'verified';
+          }
+
+          const chunkMethod: 'native_pdf' | 'vision' = hasVisionPage ? 'vision' : 'native_pdf';
+          const chunkFlags = Array.from(new Set(group.flatMap((gp: any) => gp.validationFlags || [])));
+
+          const actualText = group
+            .map((gp: any) => {
+              const body = gp.finalText || gp.text || '';
+              const printedPart =
+                gp.printedPageNumber !== undefined && gp.printedPageNumber !== null
+                  ? ` · Printed Page ${gp.printedPageNumber}`
+                  : '';
+              return `[Physical PDF Page ${gp.pageNumber}${printedPart}]\n${body}`;
+            })
+            .join('\n\n');
+
+          chunks.push({
+            id: `chunk-${chap.id}-${Math.floor(cIdx / pageSize) + 1}`,
+            document_id: documentId,
+            chapter_id: chap.id,
+            page_start: startP,
+            page_end: endP,
+            text: actualText,
+            extraction_confidence: minConfidence,
+            minimum_page_confidence: minConfidence,
+            extraction_status: chunkStatus,
+            extraction_method: chunkMethod,
+            validation_flags: chunkFlags,
+            source_physical_pages: group.map((gp: any) => gp.pageNumber),
+            printed_pages: group
+              .map((gp: any) => gp.printedPageNumber)
+              .filter((p: any) => p !== undefined && p !== null),
+          });
+        }
       }
     });
 

@@ -74,6 +74,9 @@ export interface PageCoverageRecord {
   nativeText?: string;
   nativeCharacterCount?: number;
   nativeWordCount?: number;
+  visionText?: string;
+  nativeConfidence?: number;
+  visionConfidence?: number;
   textQualityScore?: number; // 0-100
   textQualityStatus?: TextQualityStatus;
   requiresOcr?: boolean;
@@ -179,7 +182,10 @@ export interface KnowledgeChunk {
   text: string;
   embedding_reference?: string;
   extraction_confidence: number;
-  extraction_method?: ExtractionMethod | 'native' | 'ocr';
+  minimum_page_confidence?: number;
+  extraction_status?: ExtractionStatus | 'verified' | 'vision_recovered' | 'needs_review' | 'failed';
+  extraction_method?: ExtractionMethod | 'native_pdf' | 'vision';
+  validation_flags?: (ValidationFlag | string)[];
   source_physical_pages?: number[];
   printed_pages?: number[];
 }

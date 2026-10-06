@@ -32,6 +32,7 @@ import { storageService } from '../../services/storageService';
 import { examPaperService } from '../../services/examPaperService';
 import { chapterDetectionService } from '../../services/chapterDetectionService';
 import { ocrService } from '../../services/ocrService';
+import { validatePageTextQuality } from '../../utils/textQuality';
 
 interface TextbookProcessingReportProps {
   document: DocumentItem;
@@ -218,17 +219,28 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
       const pageNum = pageObj?.pageNumber || fallbackNum || 1;
       const rec = pageRecords.find((r) => r.pageNumber === pageNum);
       const text = rec?.finalText || pageObj?.text?.trim() || rec?.rawExtractedText || pageObj?.rawExtractedText || '';
+      
+      // CRITICAL ISSUE 4: Never invent a printed page number from a hardcoded offset
+      const printedNum = rec?.printedPageNumber !== undefined && rec?.printedPageNumber !== null
+        ? rec.printedPageNumber
+        : pageObj?.printedPageNumber !== undefined && pageObj?.printedPageNumber !== null
+        ? pageObj.printedPageNumber
+        : undefined;
+
+      const dynamicQuality = !rec?.extractionConfidence ? validatePageTextQuality(text) : undefined;
+      const confidence = rec?.extractionConfidence ?? pageObj?.extractionConfidence ?? dynamicQuality?.extractionConfidence ?? 0.35;
+
       return {
         pageNum,
-        printedNum: rec?.printedPageNumber ?? pageObj?.printedPageNumber ?? (pageNum >= 12 ? pageNum - 11 : undefined),
+        printedNum,
         sampleText: text.slice(0, 600) || 'No extractable text found on this physical page.',
         rawText: rec?.rawExtractedText || pageObj?.rawExtractedText || text,
         extractionMethod: rec?.extractionMethod || pageObj?.extractionMethod || 'native_pdf',
-        extractionStatus: rec?.extractionStatus || pageObj?.extractionStatus || 'needs_review',
-        extractionConfidence: rec?.extractionConfidence ?? pageObj?.extractionConfidence ?? 0.5,
-        validationFlags: (rec?.validationFlags || pageObj?.validationFlags || []) as string[],
-        flagReason: rec?.flagReason || pageObj?.flagReason,
-        isTrustworthy: rec?.hasUsableText ?? pageObj?.isTrustworthy ?? false,
+        extractionStatus: rec?.extractionStatus || pageObj?.extractionStatus || (rec?.hasUsableText ? 'verified' : 'needs_review'),
+        extractionConfidence: Number(confidence.toFixed(2)),
+        validationFlags: (rec?.validationFlags || pageObj?.validationFlags || dynamicQuality?.validationFlags || []) as string[],
+        flagReason: rec?.flagReason || pageObj?.flagReason || dynamicQuality?.flagReason,
+        isTrustworthy: rec?.hasUsableText ?? pageObj?.isTrustworthy ?? dynamicQuality?.isTrustworthy ?? false,
       };
     };
 
@@ -1192,7 +1204,7 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
                       ? 'bg-purple-100 text-purple-800 border border-purple-200'
                       : 'bg-slate-200 text-slate-700'
                   }`}>
-                    {s.extractionMethod === 'vision' ? 'Gemini Vision' : 'Native PDF'}
+                    {s.extractionMethod === 'vision' ? 'VISION RECOVERED' : 'NATIVE PDF'}
                   </span>
 
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
@@ -1203,14 +1215,14 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
                       : 'bg-amber-100 text-amber-800 border border-amber-200'
                   }`}>
                     {s.extractionStatus === 'verified'
-                      ? 'VERIFIED ✓'
+                      ? 'VERIFIED'
                       : s.extractionStatus === 'vision_recovered'
-                      ? 'VISION RECOVERED'
-                      : 'NEEDS REVIEW ⚠'}
+                      ? 'VERIFIED (VISION)'
+                      : 'NEEDS REVIEW'}
                   </span>
 
-                  <span className="text-[10px] text-slate-400 font-medium">
-                    ({Math.round((s.extractionConfidence || 0.5) * 100)}% conf)
+                  <span className="text-[10px] text-slate-700 font-bold">
+                    {Math.round((s.extractionConfidence ?? 0) * 100)}%
                   </span>
                 </div>
               </div>
@@ -1297,10 +1309,10 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-xs font-bold text-slate-800">
-                      Curricular Learning Units & Subtopics ({chapTopics.length})
+                      AI Suggested Learning Units ({chapTopics.length})
                     </span>
                     <span className="text-[10px] text-slate-500 font-medium">
-                      AI Classifications (Not authentic textbook headings)
+                      AI Classifications (Not presented as authentic textbook headings)
                     </span>
                   </div>
                   {chapTopics.length > 0 ? (
@@ -1312,7 +1324,7 @@ export const TextbookProcessingReport: React.FC<TextbookProcessingReportProps> =
                         >
                           <span className="font-medium">{top.title}</span>
                           <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-semibold shrink-0 uppercase tracking-wider">
-                            {top.category === 'authentic_heading' ? 'Textbook Heading' : 'AI Classification'}
+                            {top.category === 'authentic_heading' ? 'Textbook Heading' : 'AI Suggested Learning Unit'}
                           </span>
                         </div>
                       ))}

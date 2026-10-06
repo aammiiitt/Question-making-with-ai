@@ -3,6 +3,7 @@ import { chapterDetectionService } from './chapterDetectionService';
 import { storageService } from './storageService';
 import { classifyPageCoverage, computePageCoverageSummary } from '../utils/pageClassification';
 import { detectSourceLanguage } from '../utils/sourceClassification';
+import { ocrService } from './ocrService';
 
 export const PIPELINE_STEPS: { step: number; name: string; description: string }[] = [
   { step: 1, name: 'File uploaded', description: 'Verifying PDF structure and integrity' },
@@ -80,7 +81,7 @@ export class DocumentProcessingService {
 
     // Compute deterministic page-level coverage check using canonical classification & quality signals
     let totalExtractedWords = 0;
-    const pageCoverageRecords = extractedPages.map((p) => {
+    let pageCoverageRecords = extractedPages.map((p) => {
       const record = classifyPageCoverage(p.pageNumber, p.text);
       totalExtractedWords += record.wordCount;
       return record;
@@ -94,9 +95,11 @@ export class DocumentProcessingService {
         text: record?.finalText || p.text,
         rawExtractedText: p.text,
         normalizedText: record?.normalizedText,
+        nativeText: p.text,
         extractionMethod: record?.extractionMethod || 'native_pdf',
         extractionStatus: record?.extractionStatus || 'needs_review',
         extractionConfidence: record?.extractionConfidence ?? 0.5,
+        nativeConfidence: record?.nativeConfidence ?? record?.extractionConfidence ?? 0.5,
         validationFlags: record?.validationFlags || [],
         textQualityStatus: record?.textQualityStatus,
         physicalPdfPage: record?.physicalPdfPage || p.pageNumber,
@@ -104,19 +107,67 @@ export class DocumentProcessingService {
       };
     });
     storageService.saveDocumentPages(docId, initialPagesForStorage);
-
-    const summary = computePageCoverageSummary(pageCoverageRecords, pageCount);
     storageService.savePageCoverage(docId, pageCoverageRecords);
 
     // Source language identification using script counts across first 40–50 pages
     const detectedLanguage = detectSourceLanguage(extractedPages);
-
-    await new Promise((r) => setTimeout(r, 500));
     const bookTitle = file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
 
+    // CRITICAL ISSUE 2: Automatically invoke Vision Recovery for pages where requiresOcr === true or extractionStatus === 'needs_review'
+    const pagesNeedingVision = pageCoverageRecords.filter(
+      (r) => r.requiresOcr || r.extractionStatus === 'needs_review' || (r.validationFlags && r.validationFlags.length > 0)
+    );
+
+    // If there are problematic pages (and not 100% of an enormous book), recover them automatically with Gemini Vision
+    if (pagesNeedingVision.length > 0 && pagesNeedingVision.length <= Math.max(20, Math.floor(pageCount * 0.4))) {
+      try {
+        const pagesToRun = pagesNeedingVision.map((p) => p.pageNumber);
+        const tempDoc: DocumentItem = {
+          id: docId,
+          user_id: 'teacher-101',
+          title: bookTitle,
+          file_name: file.name,
+          file_size: file.size,
+          page_count: pageCount,
+          language: detectedLanguage,
+          status: 'processing',
+          detected_chapters_count: 0,
+          created_at: new Date().toISOString(),
+        };
+
+        // Render ONLY those physical PDF pages to images and transcribe with Gemini Vision
+        await ocrService.processOcr(tempDoc, file, pagesToRun);
+
+        // Reload authoritative recovered records and pages from storage
+        pageCoverageRecords = storageService.getPageCoverage(docId);
+        const recoveredStoredPages = storageService.getDocumentPages(docId);
+        extractedPages = recoveredStoredPages.map((sp: any) => ({
+          pageNumber: sp.pageNumber,
+          text: sp.finalText || sp.text || sp.rawExtractedText || '',
+          finalText: sp.finalText,
+          rawExtractedText: sp.rawExtractedText,
+          nativeText: sp.nativeText,
+          visionText: sp.visionText,
+          extractionMethod: sp.extractionMethod,
+          extractionStatus: sp.extractionStatus,
+          extractionConfidence: sp.extractionConfidence,
+          nativeConfidence: sp.nativeConfidence,
+          visionConfidence: sp.visionConfidence,
+          validationFlags: sp.validationFlags,
+          printedPageNumber: sp.printedPageNumber,
+        }));
+      } catch (ocrErr) {
+        console.warn('Automatic selective Vision recovery encountered an issue, preserving native text:', ocrErr);
+      }
+    }
+
+    const summary = computePageCoverageSummary(pageCoverageRecords, pageCount);
+    storageService.savePageCoverage(docId, pageCoverageRecords);
+
+    await new Promise((r) => setTimeout(r, 400));
+
     // Requirement 3 & 10: Document-level OCR decision
-    // If the majority are garbled/image-based: switch document processing to OCR FALLBACK MODE
-    // Do NOT attempt final chapter detection using corrupted native text!
+    // If the majority are still garbled/image-based: switch document processing to OCR FALLBACK MODE
     if (summary.ocrFallbackMode) {
       updateStep(2, 'failed'); // Marks quality step as requiring attention
       updateStep(3, 'pending');
@@ -145,8 +196,8 @@ export class DocumentProcessingService {
         native_garbled_pages_count: summary.nativeGarbledCount,
         native_low_text_pages_count: summary.nativeLowTextCount,
         image_only_pages_count: summary.imageOnlyCount,
-        ocr_processed_pages_count: 0,
-        ocr_successful_pages_count: 0,
+        ocr_processed_pages_count: summary.ocrProcessedCount,
+        ocr_successful_pages_count: summary.ocrSuccessfulCount,
         created_at: new Date().toISOString(),
       };
 

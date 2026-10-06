@@ -9,17 +9,18 @@ export interface RetrievedPassage {
   text: string;
   relevanceScore: number;
   contentType: SourceContentType;
+  extractionConfidence?: number;
+  extractionStatus?: string;
+  extractionMethod?: string;
+  printedPages?: number[];
+  sourcePhysicalPages?: number[];
 }
 
 export class KnowledgeRetrievalService {
   /**
    * Retrieves top source passages grounded in the specified document and chapter.
-   * Requirement 4: When preferExercise is true:
-   * 1. Prefers chunks/passages classified as exercise.
-   * 2. If suitable exercise content exists, uses it.
-   * 3. If no suitable exercise content exists, uses another valid textbook source.
-   * 4. Keeps its real classification.
-   * 5. Never invents an exercise source.
+   * CRITICAL ISSUE 7: Enforces strict safety gate.
+   * Rejects chunks that are unverified, damaged, or below safe confidence threshold.
    */
   public async retrieveRelevantPassages(
     documentId: string,
@@ -31,14 +32,62 @@ export class KnowledgeRetrievalService {
     preferExercise?: boolean
   ): Promise<RetrievedPassage[]> {
     // 1. Filter chunks by document + chapter
-    const chunks = storageService.getChunks(documentId, chapterId);
+    const allChunks = storageService.getChunks(documentId, chapterId);
 
     // Strict Grounding Rule: If no real chunks exist for this chapter, do NOT fabricate text.
-    if (chunks.length === 0) {
+    if (allChunks.length === 0) {
       return [];
     }
 
-    // 2. Compute relevance scores
+    // CRITICAL ISSUE 7: QUESTION GENERATION SAFETY GATE
+    // Only allow verified native content or successfully validated vision-recovered content.
+    // Reject or exclude chunks when:
+    // - extractionStatus === 'needs_review' OR 'failed'
+    // - minimum source-page confidence is below the safe threshold (< 0.65)
+    // - source pages contain unresolved damaging validation flags
+    // - text contains severe [অস্পষ্ট] or [UNCERTAIN] markers
+    const damagingFlags = new Set([
+      'vertically_separated_digits',
+      'gibberish_encoded_text',
+      'corrupted_legacy_glyphs',
+      'empty_page',
+      'vision_failed',
+    ]);
+
+    const safeChunks = allChunks.filter((chunk) => {
+      // Exclude failed or unverified material
+      if (chunk.extraction_status === 'failed' || chunk.extraction_status === 'needs_review') {
+        return false;
+      }
+
+      // Check safety confidence (minimum page confidence across chunk source pages)
+      const safetyConfidence = chunk.minimum_page_confidence ?? chunk.extraction_confidence ?? 1.0;
+      if (safetyConfidence < 0.65) {
+        return false;
+      }
+
+      // Check for unresolved damaging validation flags
+      if (chunk.validation_flags && chunk.validation_flags.some((flag) => damagingFlags.has(flag))) {
+        return false;
+      }
+
+      // Check for illegible markers
+      if (chunk.text.includes('[অস্পষ্ট]') || chunk.text.includes('[UNCERTAIN]')) {
+        const markerCount = (chunk.text.match(/\[অস্পষ্ট\]|\[UNCERTAIN\]/g) || []).length;
+        if (markerCount >= 2) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // If no chunks pass the safety gate, return empty to prevent contaminated questions
+    if (safeChunks.length === 0) {
+      return [];
+    }
+
+    // 2. Compute relevance scores on safe chunks
     const queryTerms = [
       topicTitle || '',
       questionType || '',
@@ -49,7 +98,7 @@ export class KnowledgeRetrievalService {
       .split(/\W+/)
       .filter((term) => term.length > 2);
 
-    const scored = chunks.map((chunk) => {
+    const scored = safeChunks.map((chunk) => {
       let score = 0.5; // base score
 
       // Real source content classification on chunk text
@@ -73,8 +122,15 @@ export class KnowledgeRetrievalService {
         }
       }
 
-      // Bonus for high extraction confidence
-      score = Math.min(1.0, score * (chunk.extraction_confidence || 0.9));
+      // Prefer verified native content and successfully validated vision content
+      if (chunk.extraction_status === 'verified') {
+        score += 0.10;
+      } else if (chunk.extraction_status === 'vision_recovered') {
+        score += 0.08;
+      }
+
+      // Weight by real safety confidence
+      score = Math.min(1.0, score * (chunk.minimum_page_confidence ?? chunk.extraction_confidence ?? 0.9));
 
       return {
         chunkId: chunk.id,
@@ -83,6 +139,11 @@ export class KnowledgeRetrievalService {
         text: chunk.text,
         relevanceScore: Number(score.toFixed(2)),
         contentType,
+        extractionConfidence: chunk.extraction_confidence,
+        extractionStatus: chunk.extraction_status,
+        extractionMethod: chunk.extraction_method,
+        printedPages: chunk.printed_pages,
+        sourcePhysicalPages: chunk.source_physical_pages,
       };
     });
 

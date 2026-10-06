@@ -198,7 +198,8 @@ export class OcrService {
                   text: ocrResult.text,
                   status: ocrResult.status,
                   errorReason: ocrResult.errorReason,
-                }
+                },
+                prevRecord?.printedPageNumber
               );
 
               // Maintain chapterId if previously assigned
@@ -208,7 +209,7 @@ export class OcrService {
 
               currentRecordsMap.set(ocrResult.pageNumber, updatedRecord);
 
-              if (ocrResult.status === 'ocr_success' && ocrResult.text.trim().length > 0) {
+              if (updatedRecord.extractionStatus === 'vision_recovered' && updatedRecord.isTrustworthy) {
                 successfulCount++;
               } else {
                 failedCount++;
@@ -247,6 +248,9 @@ export class OcrService {
           rawExtractedText: r.rawExtractedText || r.nativeText || '',
           normalizedText: r.normalizedText,
           nativeText: r.nativeText,
+          visionText: r.visionText,
+          nativeConfidence: r.nativeConfidence,
+          visionConfidence: r.visionConfidence,
           extractionMethod: r.extractionMethod,
           extractionStatus: r.extractionStatus,
           extractionConfidence: r.extractionConfidence,

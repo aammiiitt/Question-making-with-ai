@@ -24,10 +24,11 @@ export function classifyPageCoverage(
     text: string;
     status: 'ocr_success' | 'ocr_failed';
     errorReason?: string;
-  }
+  },
+  knownPrintedPageNumber?: number
 ): PageCoverageRecord {
-  // Approximate front-matter offset: Physical PDF page 12 is textbook page 1
-  const printedPageNumber = pageNumber >= 12 ? pageNumber - 11 : undefined;
+  // Only use printed page number when genuinely known/detected; do not assume a hard-coded offset
+  const printedPageNumber = knownPrintedPageNumber !== undefined ? knownPrintedPageNumber : undefined;
 
   if (isFailed) {
     return {
@@ -40,6 +41,7 @@ export function classifyPageCoverage(
       extractionStatus: 'failed',
       extractionMethod: 'native_pdf',
       extractionConfidence: 0,
+      nativeConfidence: 0,
       rawExtractedText: '',
       normalizedText: '',
       validationFlags: ['empty_page'],
@@ -63,39 +65,77 @@ export function classifyPageCoverage(
 
   const quality = validatePageTextQuality(cleanNative);
 
-  // If OCR / Vision result is provided, merge it authoritatively
+  // If OCR / Vision result is provided, validate it strictly
   if (ocrResult) {
     if (ocrResult.status === 'ocr_success' && ocrResult.text.trim().length > 0) {
       const cleanOcr = ocrResult.text.trim();
       const ocrChars = cleanOcr.length;
       const ocrWords = cleanOcr.split(/\s+/).filter(Boolean).length;
+      
+      // CRITICAL ISSUE 3: Run comprehensive quality validation on recovered transcription too
       const ocrQuality = validatePageTextQuality(cleanOcr);
-      const hasUsable = ocrChars >= 25 || ocrWords >= 6;
+      const isVisionTrustworthy = ocrQuality.isTrustworthy && (ocrChars >= 20 || ocrWords >= 4);
 
-      return {
-        pageNumber,
-        physicalPdfPage: pageNumber,
-        printedPageNumber,
-        characterCount: ocrChars,
-        wordCount: ocrWords,
-        hasUsableText: hasUsable,
-        extractionStatus: hasUsable ? 'vision_recovered' : 'needs_review',
-        extractionMethod: 'vision',
-        extractionConfidence: hasUsable ? 0.92 : 0.4,
-        rawExtractedText: cleanNative,
-        normalizedText: cleanOcr.replace(/[ \t]+/g, ' ').replace(/\n\s+/g, '\n'),
-        validationFlags: hasUsable ? [] : ['low_text_diagram'],
-        isTrustworthy: hasUsable,
-        flagReason: hasUsable ? undefined : 'Vision extracted short formula/diagram content.',
-        nativeText: cleanNative,
-        nativeCharacterCount: nativeCharCount,
-        nativeWordCount: nativeWordCount,
-        textQualityScore: Math.min(100, Math.max(80, Math.round((ocrChars / 150) * 100))),
-        textQualityStatus: 'ocr_success',
-        requiresOcr: false,
-        finalText: cleanOcr,
-        ocrStatus: 'success',
-      };
+      if (isVisionTrustworthy) {
+        return {
+          pageNumber,
+          physicalPdfPage: pageNumber,
+          printedPageNumber,
+          characterCount: ocrChars,
+          wordCount: ocrWords,
+          hasUsableText: true,
+          extractionStatus: 'vision_recovered',
+          extractionMethod: 'vision',
+          extractionConfidence: Number(ocrQuality.extractionConfidence.toFixed(2)),
+          nativeConfidence: Number(quality.extractionConfidence.toFixed(2)),
+          visionConfidence: Number(ocrQuality.extractionConfidence.toFixed(2)),
+          rawExtractedText: cleanNative,
+          normalizedText: ocrQuality.normalizedText,
+          validationFlags: ocrQuality.validationFlags,
+          isTrustworthy: true,
+          flagReason: ocrQuality.flagReason,
+          nativeText: cleanNative,
+          nativeCharacterCount: nativeCharCount,
+          nativeWordCount: nativeWordCount,
+          visionText: cleanOcr,
+          textQualityScore: ocrQuality.score,
+          textQualityStatus: 'ocr_success',
+          requiresOcr: false,
+          finalText: cleanOcr,
+          ocrStatus: 'success',
+        };
+      } else {
+        // Vision output did not pass quality validation: keep needs_review
+        const mergedFlags = Array.from(new Set([...quality.validationFlags, ...ocrQuality.validationFlags]));
+        return {
+          pageNumber,
+          physicalPdfPage: pageNumber,
+          printedPageNumber,
+          characterCount: ocrChars > 0 ? ocrChars : nativeCharCount,
+          wordCount: ocrWords > 0 ? ocrWords : nativeWordCount,
+          hasUsableText: false,
+          extractionStatus: 'needs_review',
+          extractionMethod: 'vision',
+          extractionConfidence: Number(Math.min(quality.extractionConfidence, ocrQuality.extractionConfidence).toFixed(2)),
+          nativeConfidence: Number(quality.extractionConfidence.toFixed(2)),
+          visionConfidence: Number(ocrQuality.extractionConfidence.toFixed(2)),
+          rawExtractedText: cleanNative,
+          normalizedText: ocrQuality.normalizedText || quality.normalizedText,
+          validationFlags: mergedFlags,
+          isTrustworthy: false,
+          flagReason: ocrQuality.flagReason || 'Vision output did not pass quality validation (damaged mathematical layout or symbols).',
+          nativeText: cleanNative,
+          nativeCharacterCount: nativeCharCount,
+          nativeWordCount: nativeWordCount,
+          visionText: cleanOcr,
+          textQualityScore: Math.min(quality.score, ocrQuality.score),
+          textQualityStatus: 'ocr_failed',
+          requiresOcr: true,
+          finalText: cleanNative,
+          ocrStatus: 'failed',
+          ocrErrorReason: ocrQuality.flagReason || 'Vision transcription failed quality checks',
+        };
+      }
     } else {
       return {
         pageNumber,
@@ -104,21 +144,24 @@ export function classifyPageCoverage(
         characterCount: nativeCharCount,
         wordCount: nativeWordCount,
         hasUsableText: false,
-        extractionStatus: 'failed',
-        extractionMethod: 'vision',
-        extractionConfidence: 0.1,
+        extractionStatus: 'needs_review',
+        extractionMethod: 'native_pdf',
+        extractionConfidence: Number((quality.extractionConfidence * 0.5).toFixed(2)),
+        nativeConfidence: Number(quality.extractionConfidence.toFixed(2)),
+        visionConfidence: 0,
         rawExtractedText: cleanNative,
         normalizedText: quality.normalizedText,
-        validationFlags: [...quality.validationFlags, 'vision_failed'],
+        validationFlags: Array.from(new Set([...quality.validationFlags, 'vision_failed'])),
         isTrustworthy: false,
         flagReason: ocrResult.errorReason || 'Gemini Vision fallback extraction failed for this physical page.',
         nativeText: cleanNative,
         nativeCharacterCount: nativeCharCount,
         nativeWordCount: nativeWordCount,
+        visionText: '',
         textQualityScore: quality.score,
         textQualityStatus: 'ocr_failed',
         requiresOcr: true,
-        finalText: quality.isTrustworthy ? cleanNative : '',
+        finalText: cleanNative,
         ocrStatus: 'failed',
         ocrErrorReason: ocrResult.errorReason,
       };
@@ -146,7 +189,8 @@ export function classifyPageCoverage(
     hasUsableText,
     extractionStatus,
     extractionMethod: 'native_pdf',
-    extractionConfidence: quality.extractionConfidence,
+    extractionConfidence: Number(quality.extractionConfidence.toFixed(2)),
+    nativeConfidence: Number(quality.extractionConfidence.toFixed(2)),
     rawExtractedText: cleanNative,
     normalizedText: quality.normalizedText,
     validationFlags: quality.validationFlags,
@@ -158,7 +202,7 @@ export function classifyPageCoverage(
     textQualityScore: quality.score,
     textQualityStatus: quality.status,
     requiresOcr: quality.requiresOcr,
-    finalText: quality.isTrustworthy ? cleanNative : '',
+    finalText: cleanNative,
     ocrStatus: 'none',
   };
 }
